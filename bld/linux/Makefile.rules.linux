@@ -1,0 +1,34 @@
+ifneq ($(OPT), 0)
+	CFLAGS += -O3
+	ifeq ($(PROF), 0)
+		CFLAGS += -fomit-frame-pointer
+	endif
+endif
+ifneq ($(PROF), 0)
+	CFLAGS += -pg
+endif
+
+CC      = gcc $(CFLAGS)
+
+$(BIN): $(SRC)/scanner.l $(SRC)/scanner.h $(SRC)/grammar.y $(SRC)/ool.c $(SRC)/ool.h
+	bison -d $(SRC)/grammar.y
+	flex -o scanner.c $(SRC)/scanner.l
+	$(CC) -c scanner.c
+	$(CC) -c grammar.tab.c
+	$(CC) -Wall -Wno-parentheses -Wno-unused-parameter -Wno-missing-field-initializers -W -c $(SRC)/ool.c
+	$(CC) -Wl,--export-dynamic -o $@ scanner.o grammar.tab.o ool.o -ldl
+
+socket.so: $(SRC)/socket.c $(SRC)/ool.h
+	$(CC) -fPIC -c $<
+	$(CC) -shared -Wl,-soname,socket.so -o $@ $(@:.so=.o)
+
+math.so: $(SRC)/math.c $(SRC)/ool.h
+	$(CC) -fPIC -c $<
+	$(CC) -shared -Wl,-soname,math.so -o $@ $(@:.so=.o) -lm
+
+process.so: $(SRC)/process.c $(SRC)/ool.h
+	$(CC) -fPIC -c $<
+	$(CC) -shared -Wl,-soname,socket.so -o $@ $(@:.so=.o)
+
+clean:
+	rm -f *~ *# *.c *.h *.o *.so $(BIN)

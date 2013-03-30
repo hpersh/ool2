@@ -1,0 +1,41 @@
+SRC	= ../../src
+MODULE	= ../../module
+
+DEBUG	= 1
+OPT	= 0
+PROF	= 0
+
+LIBS	= socket.so math.so process.so
+
+BIN	= ool
+
+CFLAGS	= -I$(SRC)
+ifeq ($(DEBUG), 0)
+	CFLAGS += -DNDEBUG
+else
+	CFLAGS += -g
+endif
+
+.PHONY:	all
+
+all: $(BIN) $(LIBS)
+
+libs:	$(LIBS)
+
+.PHONY: test
+
+test:
+	make $(BIN)
+	./$(BIN) $(MODULE)/test.ool
+
+.PHONY: help
+
+help:
+	@echo "Targets:"
+	@echo "ool   - Main executable"
+	@echo "libs  - Module shared libraries"
+	@echo "all   - ool and libs"
+	@echo "test  - Run unit test"
+	@echo "clean - Delete all build products"
+
+.PHONY: clean

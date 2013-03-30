@@ -1,0 +1,4 @@
+
+
+[#Metaclass new: "Html-Node" parent: #Object instance-variables: '(name attrs val)]
+

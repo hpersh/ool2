@@ -1,0 +1,26 @@
+#CFLAGS	= -g -DDEBUG
+CFLAGS  = -O3 -fomit-frame-pointer
+CC      = gcc $(CFLAGS)
+
+all: ool socket.so math.so process.so
+
+ool: scanner.l scanner.h grammar.y ool.c ool.h
+	bison -d grammar.y
+	flex -o scanner.c scanner.l
+	$(CC) -c scanner.c
+	$(CC) -c grammar.tab.c
+	$(CC) -Wall -Wno-parentheses -Wno-unused-parameter -Wno-missing-field-initializers -W -c ool.c
+	$(CC) -Wl,--export-dynamic -o ool scanner.o grammar.tab.o ool.o -ldl
+	./ool test
+
+socket.so: socket.c
+	$(CC) -fPIC -c socket.c
+	$(CC) -shared -Wl,-soname,socket.so -o socket.so socket.o
+
+math.so: math.c
+	$(CC) -fPIC -c math.c
+	$(CC) -shared -Wl,-soname,math.so -o math.so math.o -lm
+
+process.so: process.c
+	$(CC) -fPIC -c process.c
+	$(CC) -shared -Wl,-soname,process.so -o process.so process.o

@@ -1,0 +1,73 @@
+[#Metaclass new: 'Multiset parent: #Dictionary instance-variables: ()]
+
+[[Multiset instance-methods] at: "put:" put:
+	{(self key)
+		[v := [[[Multiset parent] instance-method: "at:"] eval: (self key)]]
+		[[v equals: #nil] &if: [n := 1] else: [n := [[v cdr] add: 1]]]
+		[[[Multiset parent] instance-method: "at:put:"] eval: (self key n)]
+	}
+]
+
+[[Multiset instance-methods] at: "member:" put:
+	{(self key)
+		[v := [[[Multiset parent] instance-method: "at:"] eval: (self key)]]
+		[[v equals: #nil] &if: [0 return]]
+		[v cdr]
+	}
+]
+
+[[Multiset instance-methods] at: "del:" put:
+	{(self key)
+		[v := [[[Multiset parent] instance-method: "at:"] eval: (self key)]]
+		[[[v equals: #nil] not] &if:
+			{()
+				[n := [[v cdr] sub: 1]]
+				[[n equals: 0] &if: [[[Multiset parent] instance-method: "del:"] eval: (self key)]
+					else: 
+						[[[Multiset parent] instance-method: "at:put:"] eval: (self key n)]
+				]
+			}
+		]
+	}
+]
+
+
+[#Metaclass new: 'Multimap parent: #Dictionary instance-variables: ()]
+
+[[Multimap instance-methods] at: "at:put:" put:
+	{(self key val)
+		[ms := #nil]
+		[v := [[[Multimap parent] instance-method: "at:"] eval: (self key)]]
+		[[v equals: #nil] &if:
+			{()
+				[ms = [Multiset new]]
+				[[[Multimap parent] instance-method: "at:put:"] eval: (self key ms)]
+			}
+			else:
+				[ms = [v cdr]]
+		]
+		[ms put: val]
+	}
+]
+
+[[Multimap instance-methods] at: "at:" put:
+	{(self key)
+		[#List new: [[[Multimap parent] instance-method: "at:"] eval: (self key)]]
+	}
+]
+
+[[Multimap instance-methods] at: "at:mult:" put:
+	{(self key val)
+		[v := [[[Multimap parent] instance-method: "at:"] eval: (self key)]]
+		[[v equals: #nil] &if: [0 return]]
+		[[v cdr] member: val]
+	}
+]
+
+[[Multimap instance-methods] at: "at:del:" put:
+	{(self key val)
+		[v := [[[Multimap parent] instance-method: "at:"] eval: (self key)]]
+		[[v equals: #nil] &if: [0 return]]
+		[[v cdr] del: val]
+	}
+]

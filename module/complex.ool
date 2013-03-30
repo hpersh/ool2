@@ -1,0 +1,157 @@
+[#Module new: "math"]
+
+[#Metaclass new: "Complex" parent: #Object instance-variables: '(re im)]
+
+[[Complex class-methods] at: 'new: put:
+	{(cl arg)
+		[(
+			([[arg instance-of] equals: #Integer],
+				{()
+					[re := [#Float new: arg]]
+					[im := 0.0]
+				}
+			)
+			([[arg instance-of] equals: #Float],
+				{()
+					[re := arg]
+					[im := 0.0]
+				}
+			)
+			([[[arg instance-of] equals: #Pair] or: [[arg instance-of] equals: #List]],
+				{()
+					[re := [#Float new: [arg at: 0]]]
+					[im := [#Float new: [arg at: 1]]]
+				}
+			)
+			([[arg instance-of] equals: Complex],
+				{()
+					[re := arg.re]
+					[im := arg.im]
+				}
+			)
+			(#true, [#Error raise: [("Invalid argument: " "%O") format: (arg)]])
+		) &cond
+		]
+
+		[result := [[[Complex parent] class-method: "new"] eval: (cl)]]
+		[result.re = re]
+		[result.im = im]
+
+		result
+	}
+]
+
+[[Complex class-methods] at: 'new put:
+	{(cl)
+		[Complex new: (0, 0)]
+	}
+]
+
+[[Complex instance-methods] at: 'hash put:
+	{(self)
+		[[self.re hash] add: [self.im hash]]
+	}
+]
+
+[[Complex instance-methods] at: 'equals: put:
+	{(self arg)
+		[[[arg instance-of] equals: Complex] &if: [[self.re equals: arg.re] and: [self.im equals: arg.im]]]
+	}
+]
+
+[[Complex instance-methods] at: 'tostring put:
+	{(self)
+		[result := [self.re tostring]]
+		[[[self.im equals: 0.0] not] &if:
+			{()
+				[[self.im gt: 0.0] &if: [result = [result append: "+"]]]
+				[result = [result append: [self.im tostring]]]
+				[result = [result append: "i"]]
+			}
+		]
+		result
+	}
+]
+
+[[Complex instance-methods] at: 'abs put:
+	{(self)
+		[[[self.re mult: self.re] add: [self.im mult: self.im]] sqrt]
+	}
+]
+
+[[Complex instance-methods] at: 'arg put:
+	{(self)
+		[self.im atan2: self.re]
+	}
+]
+
+[[Complex instance-methods] at: 'add: put:
+	{(self z)
+		[Complex new: ([self.re add: z.re], [self.im add: z.im])]
+	}
+]
+
+[[Complex instance-methods] at: 'sub: put:
+	{(self z)
+		[Complex new: ([self.re sub: z.re], [self.im sub: z.im])]
+	}
+]
+
+[[Complex instance-methods] at: 'minus put:
+	{(self)
+		[Complex new: ([self.re minus], [self.im minus])]
+	}
+]
+
+[[Complex instance-methods] at: 'mult: put:
+	{(self z)
+		[Complex new: ([[self.re mult: z.re] sub: [self.im mult: z.im]], [[self.re mult: z.im] add: [self.im mult: z.re]])]
+	}
+]
+
+[[Complex instance-methods] at: 'conj put:
+	{(self)
+		[Complex new: (self.re, [self.im minus])]
+	}
+]
+
+[[Complex instance-methods] at: 'recip put:
+	{(self)
+		[abs2 := [[self.re mult: self.re] add: [self.im mult: self.im]]]
+		[conj := [self conj]]
+		[Complex new: ([conj.re div: abs2], [conj.im div: abs2])]
+	}
+]
+
+[[Complex instance-methods] at: 'div: put:
+	{(self z)
+		[self mult: [z recip]]
+	}
+]
+
+[[Complex instance-methods] at: 'sqrt put:
+	{(self)
+		[abs2 := [[self abs] sqrt]]
+		[arg2 := [[self arg] div: 2.0]]
+		[Complex new: ([abs2 mult: [arg2 cos]], [abs2 mult: [arg2 sin]])]
+	}
+]
+
+[[Complex instance-methods] at: 'exp put:
+	{(self)
+		[abs := [self.re exp]]
+		[Complex new: ([abs mult: [self.im cos]], [abs mult: [self.im sin]])]
+	}
+]
+
+[[Complex instance-methods] at: 'log put:
+	{(self)
+		[Complex new: ([[self abs] log], [self arg])]
+	}
+]
+
+[[Complex instance-methods] at: 'pow: put:
+	{(self e)
+		[[e mult: [self log]] exp]
+	}
+]
