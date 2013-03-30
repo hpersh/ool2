@@ -291,6 +291,7 @@ enum {
   ERR_INVALID_METHOD,
   ERR_NO_METHOD,
   ERR_NOT_BOUND,
+  ERR_OVF,
   ERR_ASSERT_FAIL
 };
 
@@ -301,6 +302,7 @@ const char * const error_msgs[] = {
   "Invalid method",
   "No such method",
   "Symbol not bound",
+  "Arithmetic overflow",
   "Assertion failed"
 };
 
@@ -908,23 +910,15 @@ inst_walk_metaclass(obj_t inst, void (*func)(obj_t))
 void
 cm_metaclass_name(unsigned argc, obj_t args)
 {
-  obj_t recvr;
+  if (argc != 0)  error(ERR_NUM_ARGS);
 
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
-
-  vm_assign(0, CLASS(recvr)->name);
+  vm_assign(0, CLASS(consts.cl.metaclass)->name);
 }
 
 void
 cm_metaclass_parent(unsigned argc, obj_t args)
 {
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
+  if (argc != 0)  error(ERR_NUM_ARGS);
 
   vm_assign(0, CLASS(consts.cl.metaclass)->parent);
 }
@@ -932,23 +926,15 @@ cm_metaclass_parent(unsigned argc, obj_t args)
 void
 cm_metaclass_cl_methods(unsigned argc, obj_t args)
 {
-  obj_t recvr;
+  if (argc != 0)  error(ERR_NUM_ARGS);
 
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
-
-  vm_assign(0, CLASS(recvr)->cl_methods);
+  vm_assign(0, CLASS(consts.cl.metaclass)->cl_methods);
 }
 
 void
 cm_metaclass_cl_vars(unsigned argc, obj_t args)
 {
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
+  if (argc != 0)  error(ERR_NUM_ARGS);
   
   vm_assign(0, CLASS(consts.cl.metaclass)->cl_vars);
 }
@@ -956,11 +942,7 @@ cm_metaclass_cl_vars(unsigned argc, obj_t args)
 void
 cm_metaclass_inst_methods(unsigned argc, obj_t args)
 {
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
+  if (argc != 0)  error(ERR_NUM_ARGS);
   
   vm_assign(0, NIL);
 }
@@ -968,11 +950,7 @@ cm_metaclass_inst_methods(unsigned argc, obj_t args)
 void
 cm_metaclass_inst_vars(unsigned argc, obj_t args)
 {
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (recvr != consts.cl.metaclass)  error(ERR_INVALID_ARG, recvr);
+  if (argc != 0)  error(ERR_NUM_ARGS);
 
   /* Must be hard-coded, because
      inst_vars(#Metaclass) only has mutable ones
@@ -1462,22 +1440,431 @@ m_integer_new(integer_val_t val)
 void
 cm_integer_new(unsigned argc, obj_t args)
 {
-  
-}
+  obj_t         arg;
+  integer_val_t ival;
 
-void
-cm_integer_add(unsigned argc, obj_t args)
-{
-  m_integer_new(INTEGER(CAR(args))->val + INTEGER(CAR(CDR(args)))->val);
+  if (argc < 1) {
+    ival = 0;
+  } else if (argc > 1) {
+    error(ERR_NUM_ARGS);
+  } else {
+    arg = CAR(args);
+
+    if (is_kind_of(arg, consts.cl.boolean)) {
+      ival = BOOLEAN(arg)->val != 0;
+    } else if (is_kind_of(arg, consts.cl.integer)) {
+      vm_assign(0, arg);
+      return;
+    } else if (is_kind_of(arg, consts.cl._float)) {
+      ival = (integer_val_t) FLOAT(arg)->val;
+    } else if (is_kind_of(arg, consts.cl.string)) {
+      char *fmt;
+      
+      if (STRING(arg)->size >= 3
+	  && STRING(arg)->data[0] == '0'
+	  && (STRING(arg)->data[1] | 0x20) == 'x'
+	  ) {
+	fmt = INTEGER_SCANF_FMT_HEX;
+      } else if (STRING(arg)->size >= 2
+		 && STRING(arg)->data[0] == '0'
+		 ) {
+	fmt = INTEGER_SCANF_FMT_OCT;
+      } else {
+	fmt = INTEGER_SCANF_FMT_DEC;
+      }
+      
+      if (sscanf(STRING(arg)->data, fmt, &ival) != 1) {
+	error(ERR_INVALID_ARG, arg);
+      }
+    } else {
+      error(ERR_INVALID_ARG, arg);
+    }
+  }
+
+  m_integer_new(ival);
 }
 
 void
 cm_integer_tostring(unsigned argc, obj_t args)
 {
-  obj_t recvr = CAR(args);
+  obj_t recvr;
   char  buf[32];
-
+  
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  
   m_string_new(1, snprintf(buf, sizeof(buf), "%lld", INTEGER(recvr)->val), buf);
+}
+
+void
+cm_integer_tostring_base(unsigned argc, obj_t args)
+{
+  obj_t          recvr, arg;
+  integer_val_t  val, base;
+  uinteger_val_t uval, ubase;
+  char           buf[32], *p;
+  unsigned char  negf;
+  unsigned       n;
+  
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+  base = INTEGER(arg)->val;
+  if (base <= 0 || base > 36)                 error(ERR_INVALID_ARG, arg);
+  ubase = (uinteger_val_t) base;
+
+  p = &buf[ARRAY_SIZE(buf)];
+  n = 0;
+
+  val = INTEGER(recvr)->val;
+  negf = 0;
+  if (base == 10 && val < 0) {
+    negf = 1;
+    val = -val;
+  }
+  uval = (uinteger_val_t) val;
+
+  for ( ; n == 0 || uval != 0; uval /= ubase) {
+    uinteger_val_t d = uval % ubase;
+    char           c = d + (d <= 9 ? '0' : 'A' - 10);
+    
+    ASSERT(n < sizeof(buf));
+    
+    *--p = c;
+    ++n;
+    
+    if (uval == 0)  break;
+  }
+  if (negf) {
+    ASSERT(n < sizeof(buf));
+
+    *--p = '-';
+    ++n;
+  }
+
+  m_string_new(1, n, p);
+}
+
+void
+cm_integer_hash(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  
+  hash_init();
+  m_integer_new(hash(&INTEGER(recvr)->val, sizeof(INTEGER(recvr)->val)));
+}
+
+void
+cm_integer_equals(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  
+  m_boolean_new(is_kind_of(arg, consts.cl.integer)
+		&& INTEGER(arg)->val == INTEGER(recvr)->val
+		);
+}
+
+void
+cm_integer_minus(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  
+  m_integer_new(-INTEGER(recvr)->val);
+}
+
+int
+integer_sgn(integer_val_t ival)
+{
+  if (ival < 0)  return (-1);
+  if (ival > 0)  return (1);
+  return (0);
+}
+
+integer_val_t
+integer_abs(integer_val_t ival)
+{
+  return (ival < 0 ? -ival : ival);
+}
+
+void
+cm_integer_add(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t ival1, ival2, iresult;
+  int           s1, s2;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  ival1 = INTEGER(recvr)->val;
+  ival2 = INTEGER(arg)->val;
+  iresult = ival1 + ival2;
+  s1 = integer_sgn(ival1);
+  s2 = integer_sgn(ival2);
+
+  if (s1 > 0 && s2 > 0) {
+    if (!(iresult > ival1 && iresult > ival2))  error(ERR_OVF);
+  } else if (s1 < 0 && s2 < 0) {
+    if (!(iresult < ival1 && iresult < ival2))  error(ERR_OVF);
+  }
+  
+  m_integer_new(iresult);
+}
+
+void
+cm_integer_sub(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t ival1, ival2, iresult;
+  int           s1, s2;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+  
+  ival1 = INTEGER(recvr)->val;
+  ival2 = INTEGER(arg)->val;
+  iresult = ival1 - ival2;
+  s1 = integer_sgn(ival1);
+  s2 = integer_sgn(ival2);
+
+  if (s1 > 0 && s2 < 0) {
+    if (!(iresult > ival1 && iresult > ival2))  error(ERR_OVF);
+  } else if (s1 < 0 && s2 > 0) {
+    if (!(iresult < ival1 && iresult < ival2))  error(ERR_OVF);
+  }
+  
+  m_integer_new(iresult);
+}
+
+void
+cm_integer_mult(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t ival1, ival2, iresult, uval1, uval2, uresult;
+  int           s1, s2, sresult;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+  
+  ival1 = INTEGER(recvr)->val;
+  ival2 = INTEGER(arg)->val;
+  iresult = ival1 * ival2;
+  uval1 = integer_abs(ival1);
+  uval2 = integer_abs(ival2);
+  uresult = integer_abs(iresult);
+  s1 = integer_sgn(ival1);
+  s2 = integer_sgn(ival2);
+  sresult = integer_sgn(iresult);
+
+  if (ival1 != 0 && ival2 != 0) {
+    if (!(uresult > uval1 && uresult > uval2)
+	|| (s1 == s2 ? sresult < 0 : sresult > 0)
+	)  error(ERR_OVF);
+  }
+    
+  m_integer_new(iresult);
+}
+
+void
+cm_integer_div(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t ival1, ival2;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  ival1 = INTEGER(recvr)->val;
+  ival2 = INTEGER(arg)->val;
+  
+  if (ival2 == 0)  error(ERR_OVF);
+
+  m_integer_new(ival1 / ival2);
+}
+
+void
+cm_integer_mod(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t ival1, ival2;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  ival1 = INTEGER(recvr)->val;
+  ival2 = INTEGER(arg)->val;
+  
+  if (ival2 == 0)  error(ERR_OVF);
+
+  m_integer_new(ival1 % ival2);
+}
+
+void
+m_integer_range(integer_val_t init, integer_val_t lim, integer_val_t step)
+{
+    integer_val_t val;
+    obj_t         *p;
+
+    vm_push(0);
+    vm_push(1);
+
+    vm_assign(1, NIL);
+    for (p = &R1, val = init; val < lim; val += step) {
+      m_integer_new(val);
+      m_cons(R0, NIL);
+      OBJ_ASSIGN(*p, R0);
+      p = &CDR(R0);
+    }
+    vm_assign(0, R1);
+
+    vm_pop(1);
+    vm_drop();
+}
+
+void
+cm_integer_range(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  
+  m_integer_range(0, INTEGER(recvr)->val, 1);
+}
+
+void
+cm_integer_range_init(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+  
+  m_integer_range(INTEGER(arg)->val, INTEGER(recvr)->val, 1);
+}
+
+void
+cm_integer_range_init_step(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg0, arg1;
+  
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);  args = CDR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg0 = CAR(args);  args = CDR(args);
+  if (!is_kind_of(arg0, consts.cl.integer))   error(ERR_INVALID_ARG, arg0);
+  arg1 = CAR(args);
+  if (!is_kind_of(arg1, consts.cl.integer))   error(ERR_INVALID_ARG, arg1);
+  
+  m_integer_range(INTEGER(arg0)->val, INTEGER(recvr)->val, INTEGER(arg1)->val);
+}
+
+void
+cm_integer_chr(unsigned argc, obj_t args)
+{
+  obj_t         recvr;
+  integer_val_t ival;
+  char          c;
+  
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  ival = INTEGER(recvr)->val;
+  if (ival < 0 || ival > 255)                 error(ERR_INVALID_ARG, recvr);
+  
+  c = ival;
+  m_string_new(1, 1, &c);
+}
+
+void
+cm_integer_lt(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_boolean_new(INTEGER(recvr)->val < INTEGER(arg)->val);
+}
+
+void
+cm_integer_gt(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_boolean_new(INTEGER(recvr)->val > INTEGER(arg)->val);
+}
+
+void
+cm_integer_le(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_boolean_new(INTEGER(recvr)->val <= INTEGER(arg)->val);
+}
+
+void
+cm_integer_ge(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_boolean_new(INTEGER(recvr)->val >= INTEGER(arg)->val);
 }
 
 /***************************************************************************/
@@ -2039,7 +2426,7 @@ dict_key_equal(obj_t obj1, obj_t obj2)
 
   vm_push(0);
 
-  m_method_call_2(consts.str.equalc, obj1, obj2);
+  m_method_call_2(consts.str.equalsc, obj1, obj2);
   result = BOOLEAN(R0)->val;
   
   vm_pop(0);
@@ -2407,18 +2794,22 @@ struct {
   { &consts.str.atc_putc, "at:put:" },
   { &consts.str.block, "#Block" },
   { &consts.str.boolean, "#Boolean" },
+  { &consts.str.chr, "chr" },
   { &consts.str.class_methods, "class-methods" },
   { &consts.str.class_variables, "class-variables" },
   { &consts.str.code_method, "#Code-Method" },
   { &consts.str.dictionary, "#Dictionary" },
+  { &consts.str.divc, "div:" },
   { &consts.str.dptr, "#Dptr" },
   { &consts.str.environment, "#Environment" },
-  { &consts.str.equalc, "equal:" },
+  { &consts.str.equalsc, "equals:" },
   { &consts.str.eval, "eval" },
   { &consts.str.evalc, "eval:" },
   { &consts.str._false, "#false" },
   { &consts.str.file, "#File" },
   { &consts.str._float, "#Float" },
+  { &consts.str.gec, "ge:" },
+  { &consts.str.gtc, "gt:" },
   { &consts.str.hash, "hash" },
   { &consts.str.ifc, "if:" },
   { &consts.str.ifc_elsec, "if:else:" },
@@ -2426,11 +2817,16 @@ struct {
   { &consts.str.instance_methods, "instance-methods" },
   { &consts.str.instance_of, "instance-of" },
   { &consts.str.instance_variables, "instance-variables" },
+  { &consts.str.lec, "le:" },
   { &consts.str.list, "#List" },
+  { &consts.str.ltc, "lt:" },
   { &consts.str.main, "main" },
   { &consts.str.metaclass, "#Metaclass" },
   { &consts.str.method_call, "#Method-Call" },
+  { &consts.str.minus, "minus" },
   { &consts.str.module, "#Module" },
+  { &consts.str.modc, "mod:" },
+  { &consts.str.multc, "mult:" },
   { &consts.str.name, "name" },
   { &consts.str.new, "new" },
   { &consts.str.newc, "new:" },
@@ -2443,9 +2839,14 @@ struct {
   { &consts.str.parent, "parent" },
   { &consts.str.print, "print" },
   { &consts.str.quote, "quote" },
+  { &consts.str.range, "range" },
+  { &consts.str.rangec, "range:" },
+  { &consts.str.rangec_stepc, "range:step:" },
   { &consts.str.string, "#String" },
+  { &consts.str.subc, "sub:" },
   { &consts.str.system, "#System" },
   { &consts.str.tostring, "tostring" },
+  { &consts.str.tostringc, "tostring:" },
   { &consts.str._true, "#true" },
   { &consts.str.xorc, "xor:" }
 };
@@ -2472,7 +2873,7 @@ struct {
   { &consts.cl.object, &consts.str.quote,       cm_object_quote },
   { &consts.cl.object, &consts.str.eval,        cm_object_eval },
   { &consts.cl.object, &consts.str.instance_of, cm_object_instof },
-  { &consts.cl.object, &consts.str.equalc,      cm_object_eq },
+  { &consts.cl.object, &consts.str.equalsc,     cm_object_eq },
   { &consts.cl.object, &consts.str.tostring,    cm_object_tostring },
   { &consts.cl.object, &consts.str.print,       cm_object_print },
 
@@ -2483,13 +2884,29 @@ struct {
   { &consts.cl.boolean, &consts.str.xorc,      cm_boolean_xor },
   { &consts.cl.boolean, &consts.str.not,       cm_boolean_not },
   { &consts.cl.boolean, &consts.str.tostring,  cm_boolean_tostring },
-  { &consts.cl.boolean, &consts.str.equalc,    cm_boolean_equals },
+  { &consts.cl.boolean, &consts.str.equalsc,   cm_boolean_equals },
   { &consts.cl.boolean, &consts.str.ifc,       cm_boolean_if },
   { &consts.cl.boolean, &consts.str.ifc_elsec, cm_boolean_if_else },
   { &consts.cl.boolean, &consts.str.assert,    cm_boolean_assert },
 
-  { &consts.cl.integer, &consts.str.addc,     cm_integer_add },
-  { &consts.cl.integer, &consts.str.tostring, cm_integer_tostring },
+  { &consts.cl.integer, &consts.str.addc,         cm_integer_add },
+  { &consts.cl.integer, &consts.str.subc,         cm_integer_sub },
+  { &consts.cl.integer, &consts.str.multc,        cm_integer_mult },
+  { &consts.cl.integer, &consts.str.divc,         cm_integer_div },
+  { &consts.cl.integer, &consts.str.modc,         cm_integer_mod },
+  { &consts.cl.integer, &consts.str.range,        cm_integer_range },
+  { &consts.cl.integer, &consts.str.rangec,       cm_integer_range_init },
+  { &consts.cl.integer, &consts.str.rangec_stepc, cm_integer_range_init_step },
+  { &consts.cl.integer, &consts.str.chr,          cm_integer_chr },
+  { &consts.cl.integer, &consts.str.ltc,          cm_integer_lt },
+  { &consts.cl.integer, &consts.str.lec,          cm_integer_le },
+  { &consts.cl.integer, &consts.str.gtc,          cm_integer_gt },
+  { &consts.cl.integer, &consts.str.gec,          cm_integer_ge },
+  { &consts.cl.integer, &consts.str.equalsc,      cm_integer_equals },
+  { &consts.cl.integer, &consts.str.hash,         cm_integer_hash },
+  { &consts.cl.integer, &consts.str.minus,        cm_integer_minus },
+  { &consts.cl.integer, &consts.str.tostring,     cm_integer_tostring },
+  { &consts.cl.integer, &consts.str.tostringc,    cm_integer_tostring_base },
 
   { &consts.cl.string, &consts.str.eval,  cm_string_eval },
   { &consts.cl.string, &consts.str.print, cm_string_print },
