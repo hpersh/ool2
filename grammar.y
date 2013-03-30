@@ -303,8 +303,6 @@ method_call_sel_and_args:
 }
         | seln expr
 {
-  dbg_break();
-
   m_cons($2, NIL);
   m_cons($1, R0);
   
@@ -389,8 +387,6 @@ method_call:
 }
         | TOK_LSQBR expr method_call_sel_and_args TOK_RSQBR
 {
-  dbg_break();
-
   m_cons($2, $3);
   m_method_call_new(R0);
 
