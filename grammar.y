@@ -38,8 +38,12 @@ decnum:
         TOK_DECNUM
 {
   integer_val_t val = 0;
+  char          *fmt;
   
-  sscanf(yytext, INTEGER_SCANF_FMT_DEC, &val);
+  fmt = yyleng > 1 && yytext[0] == '0'
+    ? INTEGER_SCANF_FMT_OCT : INTEGER_SCANF_FMT_DEC;
+
+  sscanf(yytext, fmt, &val);
   m_integer_new(val);
   
   vm_push(0);                /* Just for keeping a reference while parsing */
