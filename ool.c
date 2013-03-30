@@ -290,7 +290,8 @@ enum {
   ERR_INVALID_ARG,
   ERR_INVALID_METHOD,
   ERR_NO_METHOD,
-  ERR_NOT_BOUND
+  ERR_NOT_BOUND,
+  ERR_ASSERT_FAIL
 };
 
 const char * const error_msgs[] = {
@@ -299,7 +300,8 @@ const char * const error_msgs[] = {
   "Invalid argument",
   "Invalid method",
   "No such method",
-  "Symbol not bound"
+  "Symbol not bound",
+  "Assertion failed"
 };
 
 void error(unsigned errcode, ...);
@@ -772,10 +774,18 @@ struct frame_method_call {
   }
 
 void
-frame_jmp(struct frame *p, int frame_jmp_code)
+frame_jmp(unsigned type, int frame_jmp_code)
 {
+  switch (type) {
+  case FRAME_TYPE_RESTART:
+  case FRAME_TYPE_BLOCK:
+    break;
+  default:
+    HARD_ASSERT(0);
+  }
+
   while (frp) {
-    if (frp == p)  longjmp(((struct frame_jmp *) frp)->jmp_buf, frame_jmp_code);
+    if (frp->type == type)  longjmp(((struct frame_jmp *) frp)->jmp_buf, frame_jmp_code);
     FRAME_POP;
   }
 
@@ -813,7 +823,7 @@ m_method_call(obj_t sel, unsigned argc, obj_t args)
   if (cl == NIL || cl == consts.cl.metaclass) {
     for (cl = recvr; cl; cl = CLASS(cl)->parent) {
       if (p = dict_at(CLASS(cl)->cl_methods, sel)) {
-	method_run(CDR(p), argc, args);
+	method_run(CDR(p), argc - 1, CDR(args));
 	goto done;
       }
     }
@@ -1218,6 +1228,20 @@ m_code_method_new(void (*func)(unsigned, obj_t))
   inst_init(R0, func);
 }
 
+void
+cm_code_method_eval(unsigned argc, obj_t args)
+{
+  obj_t recvr, nargs;
+  
+  if (argc != 2)                                  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.code_method))  error(ERR_INVALID_ARG, recvr);
+  nargs = CAR(CDR(args));
+  if (!(nargs == NIL || is_kind_of(nargs, consts.cl.list)))  error(ERR_INVALID_ARG, nargs);
+
+  (*CODE_METHOD(recvr)->func)(list_len(nargs), nargs);
+}
+
 /***************************************************************************/
 
 /* Class: Boolean */
@@ -1251,7 +1275,157 @@ m_boolean_new(unsigned val)
 void
 cm_boolean_new(unsigned argc, obj_t args)
 {
+  obj_t    arg;
+  unsigned bval;
   
+  if (argc < 1) {
+    bval = 0;
+  } else if (argc > 1) {
+    error(ERR_NUM_ARGS);
+  } else {
+    arg = CAR(args);
+
+    if (is_kind_of(arg, consts.cl.boolean)) {
+      vm_assign(0, arg);
+      return;
+    } else if (is_kind_of(arg, consts.cl.integer)) {
+      bval = INTEGER(arg)->val != 0;
+    } else if (is_kind_of(arg, consts.cl._float)) {
+      bval = FLOAT(arg)->val != 0.0;
+    } else if (is_kind_of(arg, consts.cl.string)) {
+      bval = STRING(arg)->size != 0;
+    } else {
+      error(ERR_INVALID_ARG, arg);
+    }
+  }
+
+  m_boolean_new(bval);
+}
+
+void
+cm_boolean_and(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.boolean))    error(ERR_INVALID_ARG, arg);
+  
+  m_boolean_new(BOOLEAN(recvr)->val && BOOLEAN(arg)->val);
+}
+
+void
+cm_boolean_or(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.boolean))    error(ERR_INVALID_ARG, arg);
+  
+  m_boolean_new(BOOLEAN(recvr)->val || BOOLEAN(arg)->val);
+}
+
+void
+cm_boolean_xor(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.boolean))    error(ERR_INVALID_ARG, arg);
+  
+  m_boolean_new((BOOLEAN(recvr)->val != 0) ^ (BOOLEAN(arg)->val != 0));
+}
+
+void
+cm_boolean_not(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  
+  m_boolean_new(!BOOLEAN(recvr)->val);
+}
+
+void
+cm_boolean_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_assign(0, BOOLEAN(recvr)->val ? consts.str._true : consts.str._false);
+}
+
+void
+cm_boolean_equals(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  
+  m_boolean_new(inst_of(arg) == inst_of(recvr)
+		&& (BOOLEAN(arg)->val != 0) == (BOOLEAN(recvr)->val != 0)
+		);
+}
+
+void
+cm_boolean_if(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  
+  if (BOOLEAN(recvr)->val) {
+    m_method_call_1(consts.str.eval, CAR(CDR(args)));
+  } else {
+    vm_assign(0, recvr);
+  }
+}
+
+void
+cm_boolean_if_else(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 3)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  args = CDR(args);
+  
+  m_method_call_1(consts.str.eval,
+		  BOOLEAN(recvr)->val ? CAR(args) : CAR(CDR(args))
+		  );
+}
+
+void
+cm_boolean_assert(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
+  
+  if (BOOLEAN(recvr)->val == 0)  error(ERR_ASSERT_FAIL);
+  
+  vm_assign(0, recvr);
 }
 
 /***************************************************************************/
@@ -1439,9 +1613,15 @@ string_equal(obj_t s1, obj_t s2)
 }
 
 void
-m_string_eval(obj_t s)
+cm_string_eval(unsigned argc, obj_t args)
 {
-  vm_assign(0, env_at(s));
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, env_at(recvr));
 }
 
 void
@@ -2220,7 +2400,9 @@ struct {
   char  *str;
 } init_str_tbl[] = {
   { &consts.str.addc, "add:" },
+  { &consts.str.andc, "and:" },
   { &consts.str.array, "#Array" },
+  { &consts.str.assert, "assert" },
   { &consts.str.atc, "at:" },
   { &consts.str.atc_putc, "at:put:" },
   { &consts.str.block, "#Block" },
@@ -2238,6 +2420,8 @@ struct {
   { &consts.str.file, "#File" },
   { &consts.str._float, "#Float" },
   { &consts.str.hash, "hash" },
+  { &consts.str.ifc, "if:" },
+  { &consts.str.ifc_elsec, "if:else:" },
   { &consts.str.integer, "#Integer" },
   { &consts.str.instance_methods, "instance-methods" },
   { &consts.str.instance_of, "instance-of" },
@@ -2252,7 +2436,9 @@ struct {
   { &consts.str.newc, "new:" },
   { &consts.str.newc_parentc_instvarsc, "new:parent:instance-variables:" },
   { &consts.str.nil, "nil" },
+  { &consts.str.not, "not" },
   { &consts.str.object, "#Object" },
+  { &consts.str.orc, "or:" },
   { &consts.str.pair, "#Pair" },
   { &consts.str.parent, "parent" },
   { &consts.str.print, "print" },
@@ -2260,7 +2446,8 @@ struct {
   { &consts.str.string, "#String" },
   { &consts.str.system, "#System" },
   { &consts.str.tostring, "tostring" },
-  { &consts.str._true, "#true" }
+  { &consts.str._true, "#true" },
+  { &consts.str.xorc, "xor:" }
 };
 
 struct {
@@ -2289,9 +2476,22 @@ struct {
   { &consts.cl.object, &consts.str.tostring,    cm_object_tostring },
   { &consts.cl.object, &consts.str.print,       cm_object_print },
 
+  { &consts.cl.code_method, &consts.str.evalc, cm_code_method_eval },
+
+  { &consts.cl.boolean, &consts.str.andc,      cm_boolean_and },
+  { &consts.cl.boolean, &consts.str.orc,       cm_boolean_or },
+  { &consts.cl.boolean, &consts.str.xorc,      cm_boolean_xor },
+  { &consts.cl.boolean, &consts.str.not,       cm_boolean_not },
+  { &consts.cl.boolean, &consts.str.tostring,  cm_boolean_tostring },
+  { &consts.cl.boolean, &consts.str.equalc,    cm_boolean_equals },
+  { &consts.cl.boolean, &consts.str.ifc,       cm_boolean_if },
+  { &consts.cl.boolean, &consts.str.ifc_elsec, cm_boolean_if_else },
+  { &consts.cl.boolean, &consts.str.assert,    cm_boolean_assert },
+
   { &consts.cl.integer, &consts.str.addc,     cm_integer_add },
   { &consts.cl.integer, &consts.str.tostring, cm_integer_tostring },
 
+  { &consts.cl.string, &consts.str.eval,  cm_string_eval },
   { &consts.cl.string, &consts.str.print, cm_string_print },
 
   { &consts.cl.method_call, &consts.str.eval, cm_method_call_eval }
@@ -2461,7 +2661,11 @@ main(int argc, char **argv)
   ASSERT(stats.mem.bytes_collected == 0);
 #endif
 
-  if (argc > 1)  batch();  else  interactive();
+  FRAME_MODULE_BEGIN(module_main) {
+
+    if (argc > 1)  batch();  else  interactive();
+
+  } FRAME_MODULE_END;
 
 #ifndef NDEBUG
   collect();			/* Check consistency */

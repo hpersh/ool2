@@ -40,22 +40,23 @@ struct {
     obj_t _false, _true;
   } _bool;
   struct {
-    obj_t addc, array, atc, atc_putc;
+    obj_t addc, andc, array, assert, atc, atc_putc;
     obj_t block, boolean;
     obj_t class_methods, class_variables, code_method;
     obj_t dictionary, dptr;
     obj_t environment, equalc, eval, evalc;
     obj_t _false, file, _float;
     obj_t hash;
-    obj_t instance_methods, instance_of, instance_variables, integer;
+    obj_t ifc, ifc_elsec, instance_methods, instance_of, instance_variables, integer;
     obj_t list;
     obj_t main, metaclass, method_call, module;
-    obj_t name, new, newc, newc_parentc_instvarsc, nil;
-    obj_t object;
+    obj_t name, new, newc, newc_parentc_instvarsc, nil, not;
+    obj_t object, orc;
     obj_t pair, parent, print;
     obj_t quote;
     obj_t string, system;
     obj_t tostring, _true;
+    obj_t xorc;
   } str;
   struct {
     obj_t metaclass, object, code_method, boolean, integer, _float, string;
