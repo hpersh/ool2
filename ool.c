@@ -2,10 +2,14 @@
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
+#include <ctype.h>
 #include <setjmp.h>
 #include <assert.h>
 
 #include "ool.h"
+
+#undef  PTR_64_BITS
+
 
 #ifndef NDEBUG
 #define ASSERT(x)  assert(x)
@@ -15,10 +19,10 @@
 #define HARD_ASSERT  assert
 
 #define ARRAY_SIZE(a)  (sizeof(a) / sizeof((a)[0]))
-#if 1
-#define PTR_TO_INT(x)  ((long)(x))
-#else
+#ifdef PTR_64_BITS
 #define PTR_TO_INT(x)  ((long long)(x))
+#else
+#define PTR_TO_INT(x)  ((long)(x))
 #endif
 #define FIELD_OFS(s, f)                   PTR_TO_INT(&((s *) 0)->f)
 #define FIELD_PTR_TO_STRUCT_PTR(p, s, f)  ((s *)((char *)(p) - FIELD_OFS(s, f)))
@@ -256,7 +260,12 @@ hash(void *buf, unsigned n)
 {
   unsigned char *p;
   
-  for (p = (unsigned char *) buf; n; --n, ++p)  hash_val = 37 * hash_val + *p;
+#ifdef LITTLE_ENDIAN
+  for (p = (unsigned char *) buf; n; --n, ++p)
+#else
+  for (p = (unsigned char *) buf + n - 1; n; --n, --p)
+#endif
+      hash_val = 37 * hash_val + *p;
 
   return (hash_val);
 }
@@ -289,6 +298,8 @@ enum {
   ERR_STACK_OVF,
   ERR_NUM_ARGS,
   ERR_INVALID_ARG,
+  ERR_INVALID_VALUE,
+  ERR_INVALID_VALUE_2,
   ERR_INVALID_METHOD,
   ERR_NO_METHOD,
   ERR_NOT_BOUND,
@@ -302,6 +313,8 @@ const char * const error_msgs[] = {
   "Stack overflow",
   "Incorrect number of arguments",
   "Invalid argument",
+  "Invalid value",
+  "Invalid value",
   "Invalid method",
   "No such method",
   "Symbol not bound",
@@ -2217,12 +2230,6 @@ string_len(obj_t s)
   return (result);
 }
 
-void
-cm_string_len(unsigned argc, obj_t args)
-{
-  m_integer_new(string_len(CAR(args)));
-}
-
 unsigned
 string_hash(obj_t s)
 {
@@ -2243,6 +2250,85 @@ string_equal(obj_t s1, obj_t s2)
 }
 
 void
+cm_string_hash(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  
+  m_integer_new(string_hash(recvr));
+}
+
+void
+cm_string_equal(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  
+  m_boolean_new(inst_of(arg) == inst_of(recvr)
+		&& string_equal(arg, recvr)
+		);
+}
+
+void
+cm_string_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, recvr);
+}
+
+void
+cm_string_pquote(unsigned argc, obj_t args)
+{
+  obj_t    recvr;
+  char     *p;
+  unsigned n;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+
+  for (p = STRING(recvr)->data, n = string_len(recvr); n; --n, ++p) {
+    if (isspace(*p)) {
+      m_string_new(3, 1, "\"",
+		      string_len(recvr), STRING(recvr)->data, 
+		      1, "\""
+		 );
+      return;
+    }
+  }
+
+  vm_assign(0, recvr);
+}
+
+void
+cm_string_append(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.string))    error(ERR_INVALID_ARG, arg);
+
+  m_string_new(2, string_len(recvr), STRING(recvr)->data,
+	          string_len(arg), STRING(arg)->data
+	       );
+}
+
+void
 cm_string_eval(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -2255,6 +2341,23 @@ cm_string_eval(unsigned argc, obj_t args)
 }
 
 void
+string_print(obj_t s, FILE *fp)
+{
+    char     *p, c;
+    unsigned n;
+
+    for (p = STRING(s)->data, n = string_len(s); n; --n, ++p) {
+        c = *p;
+
+        if (isprint(c) || isspace(c)) {
+            putc(c, fp);
+        } else {
+            fprintf(fp, "\\x%02x", * (unsigned char *) p);
+        }
+    }
+}
+
+void
 cm_string_print(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -2262,10 +2365,202 @@ cm_string_print(unsigned argc, obj_t args)
   if (argc != 1)                             error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
-
-  if (string_len(recvr) != 0)  fputs(STRING(recvr)->data, stdout);
-
+  
+  string_print(recvr, stdout);
+  
   vm_assign(0, recvr);
+}
+
+void
+cm_string_printc(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.file))      error(ERR_INVALID_ARG, arg);
+  
+  string_print(recvr, _FILE(arg)->fp);
+  
+  vm_assign(0, recvr);
+}
+
+void
+cm_string_len(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  
+  m_integer_new(string_len(recvr));
+}
+
+int
+m_string_substr(obj_t s, int ofs, int len)
+{
+  int result = 0;
+
+  vm_push(0);
+
+  if (ofs < 0)  ofs = (int) string_len(s) + ofs;
+  
+  if (ofs >= 0 && (ofs + len) <= (int) string_len(s)) {
+    m_string_new(1, len, STRING(s)->data + ofs);
+  } else {
+    result = -1;
+  }
+
+  vm_drop();
+  
+  return (result);
+}
+
+void
+cm_string_at(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))   error(ERR_INVALID_ARG, arg);
+
+  if (m_string_substr(recvr, INTEGER(arg)->val, 1) < 0)  error(ERR_IDX_RANGE, arg);
+}
+
+void
+cm_string_at_len(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg1, arg2;
+  integer_val_t len;
+
+  if (argc != 3)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);  args = CDR(args);
+  if (!is_kind_of(recvr, consts.cl.string))   error(ERR_INVALID_ARG, recvr);
+  arg1 = CAR(args);  args = CDR(args);
+  if (!is_kind_of(arg1, consts.cl.integer))   error(ERR_INVALID_ARG, arg1);
+  arg2 = CAR(args);
+  if (!is_kind_of(arg2, consts.cl.integer))   error(ERR_INVALID_ARG, arg2);
+  len = INTEGER(arg2)->val;
+  if (len < 0)                                error(ERR_INVALID_ARG, arg2);
+
+  if (m_string_substr(recvr, INTEGER(arg1)->val, len) < 0)  error(ERR_IDX_RANGE_2, arg1, arg2);
+}
+
+void
+cm_string_asc(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!(is_kind_of(recvr, consts.cl.string) && string_len(recvr) > 0))  error(ERR_INVALID_ARG, recvr);
+
+  m_integer_new(STRING(recvr)->data[0]);
+}
+
+void
+cm_string_foreach(unsigned argc, obj_t args)
+{
+  obj_t    recvr, arg, *p;
+  char     *s;
+  unsigned n;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+
+  vm_push(1);
+  
+  vm_assign(1, NIL);
+  for (p = &R1, s = STRING(recvr)->data, n = string_len(recvr); n; --n, ++s) {
+    m_string_new(1, 1, s);
+    m_cons(R0, NIL);
+    m_method_call_2(consts.str.evalc, arg, R0);
+    m_cons(R0, NIL);
+    OBJ_ASSIGN(*p, R0);
+    p = &CDR(R0);
+  }
+  vm_assign(0, R1);
+  
+  vm_pop(1);
+}
+
+int
+string_index(obj_t s1, obj_t s2, unsigned ofs, int dir)
+{
+    char     *p, c = STRING(s2)->data[0];
+    unsigned n = string_len(s1), i;
+
+    i = (dir < 0) ? n - 1 - ofs : ofs;
+    for (p = STRING(s1)->data + i; n; --n, p += dir, i += dir) {
+	if (*p == c)  return ((int) i);
+    }
+    return (-1);
+}
+
+void
+cm_string_index(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.string))    error(ERR_INVALID_ARG, arg);
+
+  m_integer_new(string_index(recvr, arg, 0, 1));
+}
+
+void
+cm_string_rindex(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.string))    error(ERR_INVALID_ARG, arg);
+
+  m_integer_new(string_index(recvr, arg, 0, -1));
+}
+
+void
+cm_string_split(unsigned argc, obj_t args)
+{
+  obj_t    recvr, arg, *p;
+  unsigned ofs;
+    
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.string))    error(ERR_INVALID_ARG, arg);
+
+  vm_push(1);
+  
+  vm_assign(1, NIL);
+  for (p = &R1, ofs = 0; ofs < string_len(recvr); ) {
+    int      i = string_index(recvr, arg, ofs, 1);
+    unsigned n = (i < 0) ? string_len(recvr) - ofs : (unsigned) i - ofs;
+    
+    m_string_new(1, n, STRING(recvr)->data + ofs);
+    m_cons(R0, NIL);
+    OBJ_ASSIGN(*p, R0);
+    p = &CDR(R0);
+    ofs += n + 1;
+  }
+  vm_assign(0, R1);
+  
+  vm_pop(1);
 }
 
 /***************************************************************************/
@@ -3238,6 +3533,54 @@ m_file_new(obj_t name, obj_t mode, FILE *fp)
   vm_drop();
 }
 
+FILE *
+m_file_stdin(void)
+{
+  FILE *result;
+
+  vm_push(0);
+
+  m_method_call_1(consts.str._stdin, consts.cl.file);
+  if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
+  result = _FILE(R0)->fp;
+
+  vm_pop(0);
+
+  return (result);
+} 
+
+FILE *
+m_file_stdout(void)
+{
+  FILE *result;
+
+  vm_push(0);
+
+  m_method_call_1(consts.str._stdout, consts.cl.file);
+  if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
+  result = _FILE(R0)->fp;
+
+  vm_pop(0);
+
+  return (result);
+} 
+ 
+FILE *
+m_file_stderr(void)
+{
+  FILE *result;
+
+  vm_push(0);
+
+  m_method_call_1(consts.str._stderr, consts.cl.file);
+  if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stderr", R0);
+  result = _FILE(R0)->fp;
+
+  vm_pop(0);
+
+  return (result);
+} 
+
 /***************************************************************************/
 
 /* Class: Environment */
@@ -3668,8 +4011,22 @@ struct {
   { &consts.cl._float, &consts.str.equalsc,  cm_float_equals },
   { &consts.cl._float, &consts.str.tostring, cm_float_tostring },
 
-  { &consts.cl.string, &consts.str.eval,  cm_string_eval },
-  { &consts.cl.string, &consts.str.print, cm_string_print },
+  { &consts.cl.string, &consts.str.hash,        cm_string_hash },
+  { &consts.cl.string, &consts.str.equalsc,     cm_string_equal },
+  { &consts.cl.string, &consts.str.appendc,     cm_string_append },
+  { &consts.cl.string, &consts.str.tostring,    cm_string_tostring },
+  { &consts.cl.string, &consts.str.eval,        cm_string_eval },
+  { &consts.cl.string, &consts.str.print,       cm_string_print },
+  { &consts.cl.string, &consts.str.printc,      cm_string_printc },
+  { &consts.cl.string, &consts.str.length,      cm_string_len },
+  { &consts.cl.string, &consts.str.atc,         cm_string_at },
+  { &consts.cl.string, &consts.str.atc_lengthc, cm_string_at_len },
+  { &consts.cl.string, &consts.str.asc,         cm_string_asc },
+  { &consts.cl.string, &consts.str.foreachc,    cm_string_foreach },
+  { &consts.cl.string, &consts.str.indexc,      cm_string_index },
+  { &consts.cl.string, &consts.str.rindexc,     cm_string_rindex },
+  { &consts.cl.string, &consts.str.splitc,      cm_string_split },
+  { &consts.cl.string, &consts.str.pquote,      cm_string_pquote },
 
   { &consts.cl.list, &consts.str.length,        cm_list_len },
   { &consts.cl.list, &consts.str.tostring,      cm_list_tostring },
