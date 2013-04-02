@@ -103,6 +103,7 @@ typedef unsigned long long uinteger_val_t;
 void m_integer_new(integer_val_t val);
 typedef long double float_val_t;
 #define FLOAT_SCANF_FMT  "%Lf"
+#define FLOAT_PRINTF_FMT  "%Lg"
 void m_float_new(float_val_t val);
 void m_string_new(unsigned n, ...);
 void m_pair_new(obj_t car, obj_t cdr);

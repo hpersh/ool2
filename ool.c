@@ -1986,6 +1986,161 @@ m_float_new(float_val_t val)
   inst_init(R0, val);
 }
 
+void
+cm_float_new(unsigned argc, obj_t args)
+{
+  obj_t       arg;
+  float_val_t fval;
+
+  if (argc < 1) {
+    fval = 0.0;
+  } else if (argc > 1) {
+    error(ERR_NUM_ARGS);
+  } else {
+    arg = CAR(args);
+  
+    if (is_kind_of(arg, consts.cl.boolean)) {
+      fval = BOOLEAN(arg)->val ? 1.0 : 0.0;
+    } else if (is_kind_of(arg, consts.cl.integer)) {
+      fval = (float_val_t) INTEGER(arg)->val;
+    } else if (is_kind_of(arg, consts.cl._float)) {
+      vm_assign(0, arg);
+      return;
+    } else if (is_kind_of(arg, consts.cl.string)) {
+      if (sscanf(STRING(arg)->data, FLOAT_SCANF_FMT, &fval) != 1) {
+	error(ERR_INVALID_ARG, arg);
+      }
+    } else {
+      error(ERR_INVALID_ARG, arg);
+    }
+  }
+
+  m_float_new(fval);
+}
+
+int
+float_sgn(float_val_t fval)
+{
+  if (fval < 0.0)  return (-1);
+  if (fval > 0.0)  return (1);
+  return (0);
+}
+
+float_val_t
+float_abs(float_val_t fval)
+{
+  return (fval < 0.0 ? -fval : fval);
+}
+
+void
+cm_float_add(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl._float))    error(ERR_INVALID_ARG, arg);
+
+  m_float_new(FLOAT(recvr)->val + FLOAT(arg)->val);
+}
+
+void
+cm_float_sub(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl._float))    error(ERR_INVALID_ARG, arg);
+
+  m_float_new(FLOAT(recvr)->val - FLOAT(arg)->val);
+}
+
+void
+cm_float_mult(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl._float))    error(ERR_INVALID_ARG, arg);
+
+  m_float_new(FLOAT(recvr)->val * FLOAT(arg)->val);
+}
+
+void
+cm_float_div(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl._float))    error(ERR_INVALID_ARG, arg);
+
+  m_float_new(FLOAT(recvr)->val / FLOAT(arg)->val);
+}
+
+void
+cm_float_minus(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+
+  m_float_new(-FLOAT(recvr)->val);
+}
+
+void
+cm_float_hash(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+
+  hash_init();
+  m_integer_new(hash(&FLOAT(recvr)->val, sizeof(FLOAT(recvr)->val)));
+}
+
+void
+cm_float_equals(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+
+  m_boolean_new(inst_of(arg) == inst_of(recvr)
+		&& FLOAT(arg)->val == FLOAT(recvr)->val
+		);
+}
+
+void
+cm_float_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  char  buf[64];
+
+  if (argc != 1)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+
+  m_string_new(1, snprintf(buf, sizeof(buf), FLOAT_PRINTF_FMT, FLOAT(recvr)->val), buf);
+}
+
 /***************************************************************************/
 
 /* Class: String */
@@ -3453,7 +3608,10 @@ struct {
   { &consts.cl.boolean, &consts.str.newc, cm_boolean_new },
 
   { &consts.cl.integer, &consts.str.new,  cm_integer_new },
-  { &consts.cl.integer, &consts.str.newc, cm_integer_new }
+  { &consts.cl.integer, &consts.str.newc, cm_integer_new },
+
+  { &consts.cl._float, &consts.str.new,  cm_float_new },
+  { &consts.cl._float, &consts.str.newc, cm_float_new }
 }, init_inst_method_tbl[] = {
   { &consts.cl.metaclass, &consts.str.name,               cm_class_name },
   { &consts.cl.metaclass, &consts.str.tostring,           cm_class_name },
@@ -3500,6 +3658,15 @@ struct {
   { &consts.cl.integer, &consts.str.minus,        cm_integer_minus },
   { &consts.cl.integer, &consts.str.tostring,     cm_integer_tostring },
   { &consts.cl.integer, &consts.str.tostringc,    cm_integer_tostring_base },
+
+  { &consts.cl._float, &consts.str.addc,     cm_float_add },
+  { &consts.cl._float, &consts.str.subc,     cm_float_sub },
+  { &consts.cl._float, &consts.str.multc,    cm_float_mult },
+  { &consts.cl._float, &consts.str.divc,     cm_float_div },
+  { &consts.cl._float, &consts.str.minus,    cm_float_minus },
+  { &consts.cl._float, &consts.str.hash,     cm_float_hash },
+  { &consts.cl._float, &consts.str.equalsc,  cm_float_equals },
+  { &consts.cl._float, &consts.str.tostring, cm_float_tostring },
 
   { &consts.cl.string, &consts.str.eval,  cm_string_eval },
   { &consts.cl.string, &consts.str.print, cm_string_print },
