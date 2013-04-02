@@ -506,11 +506,10 @@ obj_retain(obj_t obj)
 void
 obj_release(obj_t obj)
 {
-  if (obj == NIL)  return;
-
-  HARD_ASSERT(obj->ref_cnt != 0);
-
-  if (--obj->ref_cnt != 0)  return;
+  if (obj == NIL
+      || obj->ref_cnt == 0  /* Because of reference cycles */
+      || --obj->ref_cnt != 0
+      )  return;
 
   inst_walk(obj, obj_release);
   inst_free(obj);
