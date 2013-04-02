@@ -260,7 +260,7 @@ pair:
 list_exprs_1:
         list_exprs_1 expr
 {
-  list_concat(&$1, $2);
+  m_list_concat(&$1, $2);
   
   vm_assign(0, $1);
   
@@ -402,7 +402,7 @@ method_call:
 block_args_1:
         block_args_1 sym
 {
-  list_concat(&$1, $2);
+  m_list_concat(&$1, $2);
   
   vm_assign(0, $1);
   
@@ -437,7 +437,7 @@ block_args:
 block_body_1:
         block_body_1 expr
 {
-  list_concat(&$1, $2);
+  m_list_concat(&$1, $2);
   
   vm_assign(0, $1);
   
