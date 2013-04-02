@@ -778,12 +778,15 @@ struct frame_method_call {
   obj_t        cl, sel, args;
 };
 
-#define FRAME_METHOD_CALL_BEGIN			\
+#define FRAME_METHOD_CALL_BEGIN(_sel, _args)	\
   {						\
   struct frame_method_call __frame[1];		\
   __frame->base.prev = frp;			\
   __frame->base.type = FRAME_TYPE_METHOD_CALL;	\
   __frame->base.sp   = sp;			\
+  __frame->cl   = NIL;				\
+  __frame->sel  = (_sel);			\
+  __frame->args = (_args);			\
   frp = &__frame->base;
 
 #define FRAME_METHOD_CALL_END \
@@ -821,7 +824,6 @@ method_run(struct frame_method_call *mcfrp, obj_t cl, obj_t sel, obj_t func, uns
 {
   if (mcfrp) {
     mcfrp->cl   = cl;
-    mcfrp->sel  = sel;
     mcfrp->args = args;
   }
 
@@ -3211,7 +3213,7 @@ cm_method_call_eval(unsigned argc, obj_t args)
   }
   *r = 0;
     
-  FRAME_METHOD_CALL_BEGIN {
+  FRAME_METHOD_CALL_BEGIN(R2, R1) {
 
     m_method_call((struct frame_method_call *) frp, R2, nargc, R1);
 
@@ -3647,8 +3649,10 @@ bt_print(void)
 
     q = (struct frame_method_call *) p;
 
-    m_method_call_1(consts.str.print, q->cl);
-    putchar('.');
+    if (q->cl) {
+      m_method_call_1(consts.str.print, q->cl);
+      putchar('.');
+    }
     m_method_call_1(consts.str.print, q->sel);
     m_method_call_1(consts.str.print, q->args);
     putchar('\n');
