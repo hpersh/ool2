@@ -111,9 +111,10 @@ struct inst_dict {
   unsigned (*key_equal)(obj_t key1, obj_t key2);
 };
 #define DICT(x)  ((struct inst_dict *)(x))
-obj_t dict_at(obj_t dict, obj_t key);
-void  dict_at_put(obj_t dict, obj_t key, obj_t val);
-void  dict_del(obj_t dict, obj_t key);
+obj_t    dict_at(obj_t dict, obj_t key);
+void     dict_at_put(obj_t dict, obj_t key, obj_t val);
+void     dict_del(obj_t dict, obj_t key);
+unsigned dict_count(obj_t dict);
 void  m_dict_keys(obj_t dict);
 
 struct inst_module {
@@ -131,8 +132,9 @@ struct inst_file {
 #define _FILE(x)  ((struct inst_file *)(x))
 
 obj_t env_at(obj_t s);
-void env_new_put(obj_t s, obj_t val);
-void env_at_put(obj_t s, obj_t val);
+void  env_new_put(obj_t s, obj_t val);
+void  env_at_put(obj_t s, obj_t val);
+void  env_del(obj_t s);
 
 /*
   Class instance relationship
@@ -259,13 +261,18 @@ unsigned
 hash(void *buf, unsigned n)
 {
   unsigned char *p;
-  
-#ifdef LITTLE_ENDIAN
-  for (p = (unsigned char *) buf; n; --n, ++p)
-#else
-  for (p = (unsigned char *) buf + n - 1; n; --n, --p)
-#endif
-      hash_val = 37 * hash_val + *p;
+
+  for (p = (unsigned char *) buf; n; --n, ++p)  hash_val = 37 * hash_val + *p;
+
+  return (hash_val);
+}
+
+unsigned
+hashb(void *buf, unsigned n)
+{
+  unsigned char *p;
+
+  for (p = (unsigned char *) buf + n - 1; n; --n, --p)  hash_val = 37 * hash_val + *p;
 
   return (hash_val);
 }
@@ -302,10 +309,12 @@ enum {
   ERR_INVALID_VALUE_2,
   ERR_INVALID_METHOD,
   ERR_NO_METHOD,
+  ERR_BAD_FORM,
   ERR_NOT_BOUND,
   ERR_OVF,
   ERR_IDX_RANGE,
   ERR_IDX_RANGE_2,
+  ERR_CONST,
   ERR_ASSERT_FAIL
 };
 
@@ -317,10 +326,12 @@ const char * const error_msgs[] = {
   "Invalid value",
   "Invalid method",
   "No such method",
+  "Bad form",
   "Symbol not bound",
   "Arithmetic overflow",
   "Index out of range",
   "Index out of range",
+  "Write constant",
   "Assertion failed"
 };
 
@@ -1076,12 +1087,21 @@ cm_class_new(unsigned argc, obj_t args)
   inst_vars = CAR(args);
 
   m_class_new(name, parent, module_cur);
-  CLASS(R0)->inst_size = CLASS(parent)->inst_size + list_len(inst_vars) * sizeof(obj_t);
-  CLASS(R0)->inst_init = inst_init_user;
-  CLASS(R0)->inst_walk = inst_walk_user;
-  CLASS(R0)->inst_free = inst_free_user;
-
   vm_assign(1, R0);
+
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(R1)->cl_vars, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(R1)->cl_methods, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(R1)->inst_vars, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(R1)->inst_methods, R0);
+  CLASS(R1)->inst_size = CLASS(parent)->inst_size + list_len(inst_vars) * sizeof(obj_t);
+  CLASS(R1)->inst_init = inst_init_user;
+  CLASS(R1)->inst_walk = inst_walk_user;
+  CLASS(R1)->inst_free = inst_free_user;
+
   for (ofs = CLASS(parent)->inst_size; inst_vars; inst_vars = CDR(inst_vars), ofs += sizeof(obj_t)) {
     m_integer_new(ofs);
     dict_at_put(CLASS(R1)->inst_vars, CAR(inst_vars), R0);
@@ -1661,7 +1681,14 @@ cm_integer_hash(unsigned argc, obj_t args)
   if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
   
   hash_init();
-  m_integer_new(hash(&INTEGER(recvr)->val, sizeof(INTEGER(recvr)->val)));
+  m_integer_new(
+#ifdef LITTLE_ENDIAN
+		hash
+#else
+		hashb
+#endif
+		(&INTEGER(recvr)->val, sizeof(INTEGER(recvr)->val))
+		);
 }
 
 void
@@ -1785,11 +1812,12 @@ cm_integer_mult(unsigned argc, obj_t args)
   sresult = integer_sgn(iresult);
 
   if (ival1 != 0 && ival2 != 0) {
-    if (!(uresult > uval1 && uresult > uval2)
-	|| (s1 == s2 ? sresult < 0 : sresult > 0)
-	)  error(ERR_OVF);
+    if (!(uresult >= uval1 && uresult >= uval2
+	  && (s1 == s2 ? sresult > 0 : sresult < 0)
+	  )
+	) error(ERR_OVF);
   }
-    
+  
   m_integer_new(iresult);
 }
 
@@ -2125,7 +2153,14 @@ cm_float_hash(unsigned argc, obj_t args)
   if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
 
   hash_init();
-  m_integer_new(hash(&FLOAT(recvr)->val, sizeof(FLOAT(recvr)->val)));
+  m_integer_new(
+#ifdef LITTLE_ENDIAN
+		hash
+#else
+		hashb
+#endif
+		(&FLOAT(recvr)->val, sizeof(FLOAT(recvr)->val))
+		);
 }
 
 void
@@ -2237,7 +2272,7 @@ string_hash(obj_t s)
 {
   hash_init();
 
-  return (hash(STRING(s)->data, string_len(s)));
+  return (hashb(STRING(s)->data, string_len(s)));
 }
 
 unsigned
@@ -2539,7 +2574,7 @@ void
 cm_string_split(unsigned argc, obj_t args)
 {
   obj_t    recvr, arg, *p;
-  unsigned ofs;
+  unsigned ofs, recvr_len;
     
   if (argc != 2)                             error(ERR_NUM_ARGS);
   recvr = CAR(args);
@@ -2550,9 +2585,10 @@ cm_string_split(unsigned argc, obj_t args)
   vm_push(1);
   
   vm_assign(1, NIL);
-  for (p = &R1, ofs = 0; ofs < string_len(recvr); ) {
+  recvr_len = string_len(recvr);
+  for (p = &R1, ofs = 0; ofs < recvr_len; ) {
     int      i = string_index(recvr, arg, ofs, 1);
-    unsigned n = (i < 0) ? string_len(recvr) - ofs : (unsigned) i - ofs;
+    unsigned n = (i < 0) ? recvr_len - ofs : (unsigned) i - ofs;
     
     m_string_new(1, n, STRING(recvr)->data + ofs);
     m_cons(R0, NIL);
@@ -2593,6 +2629,75 @@ inst_free_dptr(obj_t cl, obj_t inst)
   inst_free_parent(cl, inst);  
 }
 
+void
+cm_dptr_car(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dptr))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, CAR(recvr));
+}
+
+void
+cm_dptr_cdr(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dptr))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_assign(0, CDR(recvr));
+}
+
+void
+cm_dptr_hash(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dptr))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_pushm(1, 2);
+  
+  m_method_call_1(consts.str.hash, CAR(recvr));
+  vm_assign(1, R0);
+  m_method_call_1(consts.str.hash, CDR(recvr));
+  vm_assign(2, R0);
+  m_method_call_2(consts.str.addc, R1, R2); /* TBD: Or call directly? */
+  
+  vm_popm(1, 2);
+}
+
+void
+cm_dptr_equals(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dptr))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.dptr)) {
+    m_boolean_new(0);
+    return;
+  }
+
+  vm_pushm(1, 2);
+  
+  m_method_call_2(consts.str.equalsc, CAR(recvr), CAR(arg));
+  vm_assign(1, R0);
+  m_method_call_2(consts.str.equalsc, CDR(recvr), CDR(arg));
+  vm_assign(2, R0);
+  m_method_call_2(consts.str.andc, R1, R2); /* TBD: Or call directly? */
+  
+  vm_popm(1, 2);
+}
+
 /***************************************************************************/
 
 /* Class: Pair */
@@ -2624,6 +2729,96 @@ m_pair_new(obj_t car, obj_t cdr)
   inst_init(R0, car, cdr);
 
   vm_drop();
+}
+
+void
+cm_pair_new(unsigned argc, obj_t args)
+{
+  obj_t arg, car = NIL, cdr = NIL;
+
+  if (argc > 1) {
+    error(ERR_NUM_ARGS);
+  } else if (argc == 1) {
+    arg = CAR(args);
+    
+    if (is_kind_of(arg, consts.cl.dptr)) {
+      car = CAR(arg);
+      cdr = CDR(arg);
+    } else {
+      error(ERR_INVALID_ARG, arg);
+    }
+  }
+
+  m_pair_new(car, cdr);
+}
+
+void
+cm_pair_eval(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.pair))  error(ERR_INVALID_ARG, recvr);
+
+  vm_push(1);
+  
+  m_method_call_1(consts.str.eval, CAR(recvr));
+  vm_assign(1, R0);
+  m_method_call_1(consts.str.eval, CDR(recvr));
+  m_pair_new(R1, R0);
+  
+  vm_pop(1);
+}
+
+void
+cm_pair_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.pair))  error(ERR_INVALID_ARG, recvr);
+
+  vm_pushm(1, 2);
+  
+  m_method_call_1(consts.str.tostring, CAR(recvr));
+  vm_assign(1, R0);
+  m_method_call_1(consts.str.tostring, CDR(recvr));
+  vm_assign(2, R0);
+  m_string_new(5, 1, "(",
+	          string_len(R1), STRING(R1)->data,
+	          2, ", ",
+	          string_len(R2), STRING(R2)->data,
+	          1, ")"
+	       );
+  
+  vm_popm(1, 2);
+}
+
+void
+cm_pair_at(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg, result;
+
+  if (argc != 2)                            error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.pair))   error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))  error(ERR_INVALID_ARG, arg);
+
+  switch (INTEGER(arg)->val) {
+  case 0:
+    result = CAR(recvr);
+    break;
+  case 1:
+    result = CDR(recvr);
+    break;
+  default:
+    error(ERR_IDX_RANGE, arg);
+  }
+  
+  vm_assign(0, result);
 }
 
 /***************************************************************************/
@@ -2717,24 +2912,6 @@ cm_list_new(unsigned argc, obj_t args)
     
     return;
   }
-  if (is_kind_of(arg, consts.cl.array)) {
-    obj_t    *p, *q;
-    unsigned n;
-
-    vm_push(1);
-    
-    vm_assign(1, NIL);
-    for (p = &R1, q = ARRAY(arg)->data, n = ARRAY(arg)->size; n; --n, ++q) {
-      m_cons(*q, NIL);
-      OBJ_ASSIGN(*p, R0);
-      p = &CDR(R0);
-    }
-    vm_assign(0, R1);
-
-    vm_pop(1);
-
-    return;
-  }
   if (is_kind_of(arg, consts.cl.dict)) {
     obj_t    *p, *q, r;
     unsigned n;
@@ -2748,6 +2925,24 @@ cm_list_new(unsigned argc, obj_t args)
 	OBJ_ASSIGN(*p, R0);
 	p = &CDR(R0);
       }
+    }
+    vm_assign(0, R1);
+
+    vm_pop(1);
+
+    return;
+  }
+  if (is_kind_of(arg, consts.cl.array)) {
+    obj_t    *p, *q;
+    unsigned n;
+
+    vm_push(1);
+    
+    vm_assign(1, NIL);
+    for (p = &R1, q = ARRAY(arg)->data, n = ARRAY(arg)->size; n; --n, ++q) {
+      m_cons(*q, NIL);
+      OBJ_ASSIGN(*p, R0);
+      p = &CDR(R0);
     }
     vm_assign(0, R1);
 
@@ -2982,7 +3177,8 @@ cm_list_equals(unsigned argc, obj_t args)
 
   vm_push(1);
   
-  vm_assign(1, consts._bool._true);
+  m_boolean_new(1);
+  vm_assign(1, R0);
   for ( ;
 	BOOLEAN(R1)->val && recvr && arg;
 	recvr = CDR(recvr), arg = CDR(arg)
@@ -2991,8 +3187,7 @@ cm_list_equals(unsigned argc, obj_t args)
     m_method_call_2(consts.str.andc, R1, R0); /* TBD: Or call directly? */
     vm_assign(1, R0);
   }
-  if (recvr || arg)  vm_assign(1, consts._bool._false);
-  vm_assign(0, R1);
+  if (recvr || arg)  m_boolean_new(0);  else  vm_assign(0, R1);
   
   vm_pop(1);
 }
@@ -3115,11 +3310,6 @@ cm_list_reduce(unsigned argc, obj_t args)
   vm_pop(1);
 }
 
-
-
-
-
-
 /***************************************************************************/
 
 /* Class: Method call */
@@ -3158,6 +3348,18 @@ m_method_call_new(obj_t li)
 }
 
 void
+cm_method_call_new(unsigned argc, obj_t args)
+{
+  obj_t arg;
+
+  if (argc != 1)                         error(ERR_NUM_ARGS);
+  arg = CAR(args);
+  if (!is_kind_of(arg, consts.cl.list))  error(ERR_INVALID_ARG, arg);
+
+  m_method_call_new(arg);
+}
+
+void
 cm_method_call_eval(unsigned argc, obj_t args)
 {
   obj_t    recvr;
@@ -3181,6 +3383,8 @@ cm_method_call_eval(unsigned argc, obj_t args)
   }
   ++s;
   
+  /* Verify well-formedness, and check for quote */
+
   if (n == 2) {
     nargc = 1;
     
@@ -3190,6 +3394,8 @@ cm_method_call_eval(unsigned argc, obj_t args)
     
     nargc = 1 + (n >> 1);
   } else  ASSERT(0);
+
+  /* Concatenate selector, and build arg list */
 
   vm_pushm(1, 2);
 
@@ -3213,6 +3419,8 @@ cm_method_call_eval(unsigned argc, obj_t args)
   }
   *r = 0;
     
+  /* Call method */
+
   FRAME_METHOD_CALL_BEGIN(R2, R1) {
 
     m_method_call((struct frame_method_call *) frp, R2, nargc, R1);
@@ -3220,6 +3428,18 @@ cm_method_call_eval(unsigned argc, obj_t args)
   } FRAME_METHOD_CALL_END;
   
   vm_popm(1, 2);
+}
+
+void
+cm_method_call_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                                  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.method_call))  error(ERR_INVALID_ARG, recvr);
+
+  m_list_tostr(METHOD_CALL(recvr)->list, "[]");
 }
 
 /***************************************************************************/
@@ -3262,17 +3482,49 @@ m_block_new(obj_t li)
 void
 cm_block_eval(unsigned argc, obj_t args)
 {
-  obj_t recvr = CAR(args);
+  obj_t recvr, arg, li, p;
 
-  if (!is_kind_of(recvr, consts.cl.block))  error(ERR_INVALID_ARG, recvr);
-  if (argc != 1)  error(ERR_NUM_ARGS);
+  if (argc != 2)                            error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.block))  error(ERR_INVALID_ARG);
+  li = BLOCK(recvr)->list;
+  if (li == NIL)                            error(ERR_BAD_FORM, recvr);
+  p = CAR(li);
+  if (!(p == NIL || is_kind_of(p, consts.cl.list)))      error(ERR_BAD_FORM, recvr);
+  arg = CAR(CDR(args));
+  if (!(arg == NIL || is_kind_of(arg, consts.cl.list)))  error(ERR_INVALID_ARG);
+  if (list_len(p) != list_len(arg))         error(ERR_NUM_ARGS);
 
   m_string_dict_new(16);
+  for ( ; p; p = CDR(p), arg = CDR(arg)) {
+    dict_at_put(R0, CAR(p), CAR(arg));
+  }
   vm_push(0);
+  
   FRAME_BLOCK_BEGIN(R0) {
-    frame_jmp_code = frame_jmp_code;
+
+    if (frame_jmp_code == 0) {
+      vm_assign(0, NIL);
+      for (p = CDR(li); p; p = CDR(p)) {
+	m_method_call_1(consts.str.eval, CAR(p));
+      }
+    }
+    
   } FRAME_BLOCK_END;
+  
   vm_drop();
+}
+
+void
+cm_block_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.block))  error(ERR_INVALID_ARG, recvr);
+
+  m_list_tostr(BLOCK(recvr)->list, "{}");
 }
 
 /***************************************************************************/
@@ -3316,6 +3568,124 @@ m_array_new(unsigned size)
   inst_init(R0, size);
 }
 
+void
+cm_array_new(unsigned argc, obj_t args)
+{
+  obj_t arg;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  arg = CAR(args);
+
+  if (is_kind_of(arg, consts.cl.integer)) {
+    integer_val_t size = INTEGER(arg)->val;
+
+    if (size < 0)  error(ERR_INVALID_ARG, arg);
+
+    m_array_new(size);
+    return;
+  }
+  if (is_kind_of(arg, consts.cl.list)) {
+    obj_t    *p;
+    unsigned n;
+    
+    m_array_new(list_len(arg));
+    for (p = ARRAY(R0)->data, n = ARRAY(R0)->size; n; --n, ++p, arg = CDR(arg)) {
+      OBJ_ASSIGN(*p, CAR(arg));
+    }
+    return;
+  }
+  if (is_kind_of(arg, consts.cl.array)) {
+    obj_t    *p, *q;
+    unsigned n;
+
+    m_array_new(ARRAY(arg)->size);
+    for (p = ARRAY(R0)->data, q = ARRAY(arg)->data, n = ARRAY(arg)->size;
+	 n;
+	 --n, ++p, ++q
+	 ) {
+      OBJ_ASSIGN(*p, *q);
+    }
+    return;
+  }
+  if (is_kind_of(arg, consts.cl.dict)) {
+    unsigned size = dict_count(arg), n;
+    obj_t    *p, *q, r;
+
+    m_array_new(size);
+    for (p = ARRAY(R0)->data, q = DICT(arg)->base->data, n = DICT(arg)->base->size;
+	 n;
+	 --n, ++q
+	 ) {
+      for (r = *q; r; r = CDR(r)) {
+	OBJ_ASSIGN(*p, CAR(r));
+	++p;
+      }
+    }
+  }
+  
+  error(ERR_INVALID_ARG, arg);
+}
+
+void
+cm_array_at(unsigned argc, obj_t args)
+{
+  obj_t       recvr, arg;
+  integer_val_t idx;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.array))   error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))   error(ERR_INVALID_ARG, arg);
+  idx = INTEGER(arg)->val;
+  if (idx < 0 || idx >= ARRAY(recvr)->size)  error(ERR_IDX_RANGE, arg);
+
+  vm_assign(0, ARRAY(recvr)->data[idx]);
+}
+
+void
+cm_array_at_put(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  integer_val_t idx;
+
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);  args = CDR(args);
+  if (!is_kind_of(recvr, consts.cl.array))   error(ERR_INVALID_ARG, recvr);
+  arg = CAR(args);  args = CDR(args);
+  if (!is_kind_of(arg, consts.cl.integer))   error(ERR_INVALID_ARG, arg);
+  idx = INTEGER(arg)->val;
+  if (idx < 0 || idx >= ARRAY(recvr)->size)  error(ERR_IDX_RANGE, arg);
+  arg = CAR(args);
+
+  OBJ_ASSIGN(ARRAY(recvr)->data[idx], arg);
+  
+  vm_assign(0, arg);
+}
+
+void
+m_collection_tostring(obj_t obj)
+{
+  vm_push(0);
+
+  m_method_call_2(consts.str.newc, consts.cl.list, obj);
+  m_method_call_1(consts.str.tostring, R0); /* TBD: Or call directly? */
+
+  vm_drop();
+}
+
+void
+cm_array_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.array))  error(ERR_INVALID_ARG, recvr);
+
+  m_collection_tostring(recvr);
+}
+
 /***************************************************************************/
 
 /* Class: Dictionary */
@@ -3346,6 +3716,12 @@ m_string_dict_new(unsigned size)
 {
   vm_inst_alloc(consts.cl.dict);
   inst_init(R0, string_hash, string_equal, size);
+}
+
+unsigned
+m_dict_size_dflt(void)
+{
+  return (32);
 }
 
 unsigned
@@ -3386,46 +3762,92 @@ m_dict_new(unsigned size)
 }
 
 obj_t
-dict_find(obj_t dict, obj_t key, obj_t **bucket)
+dict_find(obj_t dict, obj_t key, obj_t **pprev)
 {
-  obj_t *b = &DICT(dict)->base->data[(*DICT(dict)->key_hash)(key) % DICT(dict)->base->size];
-  obj_t p, q;
+  obj_t p, *pp, *b = &DICT(dict)->base->data[(*DICT(dict)->key_hash)(key) % DICT(dict)->base->size];
   unsigned (*f)(obj_t, obj_t) = DICT(dict)->key_equal;
-  
-  if (bucket)  *bucket = b;
 
-  for (p = *b; p; p = CDR(p)) {
-    q = CAR(p);
-    if ((*f)(key, CAR(q)))  return (q);
+  for (pp = b; p = *pp; pp = &CDR(p)) {
+    obj_t q = CAR(p);
+    
+    if ((*f)(CAR(q), key)) {
+      if (pprev)  *pprev = pp; 
+      return (p);
+    }
   }
-
+  
+  if (pprev)  *pprev = b;
   return (NIL);
 }
 
 obj_t
 dict_at(obj_t dict, obj_t key)
 {
-  return (dict_find(dict, key, 0));
+  obj_t p;
+  
+  return ((p = dict_find(dict, key, 0)) ? CAR(p) : NIL);
+}
+
+void
+dict_const_chk(obj_t key)
+{
+  if (inst_of(key) == consts.cl.string
+      && STRING(key)->size > 0
+      && STRING(key)->data[0] == '#'
+      ) {
+    error(ERR_CONST);
+  }
 }
 
 void
 dict_at_put(obj_t dict, obj_t key, obj_t val)
 {
-  obj_t p, *b;
-
-  if (p = dict_find(dict, key, &b)) {
-    OBJ_ASSIGN(CDR(p), val);
-
-    return;
+  obj_t p, *pp;
+  
+  if (p = dict_find(dict, key, &pp)) {
+    dict_const_chk(key);
+    
+    OBJ_ASSIGN(CDR(CAR(p)), val);
+  } else {
+    vm_push(0);
+    
+    m_pair_new(key, val);
+    m_cons(R0, *pp);
+    OBJ_ASSIGN(*pp, R0);
+    
+    vm_pop(0);
   }
+}
 
-  vm_push(0);
+void
+dict_del(obj_t dict, obj_t key)
+{
+  obj_t p, *pp;
   
-  m_pair_new(key, val);
-  m_cons(R0, *b);
-  OBJ_ASSIGN(*b, R0);
+  if ((p = dict_find(dict, key, &pp)) == 0)  return;
   
-  vm_pop(0);
+  vm_push(1);
+  
+  vm_assign(1, p);
+  OBJ_ASSIGN(*pp, CDR(p));
+  
+  vm_pop(1);
+}
+
+unsigned
+dict_count(obj_t dict)
+{
+  unsigned result, n;
+  obj_t    *p;
+  
+  for (result = 0, p = DICT(dict)->base->data, n = DICT(dict)->base->size;
+       n;
+       --n, ++p
+       ) {
+    result += list_len(*p);
+  }
+  
+  return (result);
 }
 
 void
@@ -3452,6 +3874,128 @@ m_dict_keys(obj_t dict)
 
   vm_pop(1);
   vm_drop();
+}
+
+void
+cm_dict_new(unsigned argc, obj_t args)
+{
+  obj_t arg;
+
+  if (argc == 0) {
+    m_dict_new(m_dict_size_dflt());
+    return;
+  }
+
+  if (argc > 1)  error(ERR_NUM_ARGS);
+
+  arg = CAR(args);
+
+  if (is_kind_of(arg, consts.cl.integer)) {
+    integer_val_t size = INTEGER(arg)->val;
+
+    if (size <= 0)  error(ERR_INVALID_ARG, arg);
+
+    m_dict_new((unsigned) size);
+    return;
+  }
+  if (is_kind_of(arg, consts.cl.list)) {
+    obj_t p;
+
+    for (p = arg; p; p = CDR(p)) {
+      if (!is_kind_of(CAR(p), consts.cl.pair))  error(ERR_INVALID_ARG, arg);
+    }
+
+    m_dict_new(m_dict_size_dflt());
+
+    for (p = arg; p; p = CDR(p)) {
+      obj_t q = CAR(p);
+      
+      dict_at_put(R0, CAR(q), CDR(q));
+    }
+
+    return;
+  }
+
+  error(ERR_INVALID_ARG, arg);
+}
+
+void
+cm_dict_at(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, dict_at(recvr, CAR(CDR(args))));
+}
+
+void
+cm_dict_at_put(unsigned argc, obj_t args)
+{
+  obj_t recvr, k, v;
+
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);  args = CDR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+  k = CAR(args);  args = CDR(args);
+  v = CAR(args);
+  
+  dict_at_put(recvr, k, v);
+  
+  vm_assign(0, v);
+}
+
+void
+cm_dict_del(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  
+  dict_del(recvr, arg);
+  
+  vm_assign(0, arg);
+}
+
+void
+cm_dict_keys(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+
+  m_dict_keys(recvr);
+}
+
+void
+cm_dict_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+
+  m_collection_tostring(recvr);
+}
+
+void
+cm_dict_count(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
+
+  m_integer_new(dict_count(recvr));
 }
 
 /***************************************************************************/
@@ -3587,16 +4131,6 @@ m_file_stderr(void)
 
 /* Class: Environment */
 
-void
-env_new_put(obj_t s, obj_t val)
-{
-}
-
-void
-env_at_put(obj_t s, obj_t val)
-{
-}
-
 obj_t
 env_at(obj_t s)
 {
@@ -3623,6 +4157,121 @@ env_at(obj_t s)
   error(ERR_NOT_BOUND, s);
 
   return (NIL);
+}
+
+obj_t
+env_top_dict(void)
+{
+  struct frame *p;
+
+  for (p = frp; p; p = p->prev) {
+    switch (p->type) {
+    case FRAME_TYPE_BLOCK:
+      return (((struct frame_block *) p)->dict);
+    case FRAME_TYPE_MODULE:
+      return (OBJ(MODULE(((struct frame_module *) p)->module)->base));
+    default:
+      ;
+    }
+  }
+
+  return (NIL);
+}
+
+void
+env_new_put(obj_t s, obj_t val)
+{
+  dict_at_put(env_top_dict(), s, val);
+}
+
+void
+env_at_put(obj_t s, obj_t val)
+{
+  struct frame *p;
+  obj_t        dd = NIL, d, q;
+
+  for (p = frp; p; p = p->prev) {
+    switch (p->type) {
+    case FRAME_TYPE_BLOCK:
+      d = ((struct frame_block *) p)->dict;
+      break;
+    case FRAME_TYPE_MODULE:
+      d = OBJ(MODULE(((struct frame_module *) p)->module)->base);
+      break;
+    default:
+      continue;
+    }
+
+    if (dd == NIL)  dd = d;
+    if (q = dict_find(d, s, 0)) {
+      OBJ_ASSIGN(CDR(CAR(q)), val);
+      return;
+    }
+  }
+
+  HARD_ASSERT(dd != NIL);
+
+  dict_at_put(dd, s, val);
+}
+
+void
+env_del(obj_t s)
+{
+  dict_del(env_top_dict(), s);
+}
+
+void
+cm_env_new_put(unsigned argc, obj_t args)
+{
+  obj_t val;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+
+  env_new_put(CAR(args), val = CAR(CDR(args)));
+
+  vm_assign(0, val);
+}
+
+void
+cm_env_new(unsigned argc, obj_t args)
+{
+  obj_t val = NIL;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+
+  env_new_put(CAR(args), val);
+
+  vm_assign(0, val);
+}
+
+void
+cm_env_at_put(unsigned argc, obj_t args)
+{
+  obj_t val;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+
+  env_at_put(CAR(args), val = CAR(CDR(args)));
+
+  vm_assign(0, val);
+}
+
+void
+cm_env_at(unsigned argc, obj_t args)
+{
+  if (argc != 1)  error(ERR_NUM_ARGS);
+
+  vm_assign(0, env_at(CAR(args)));
+}
+
+void
+cm_env_del(unsigned argc, obj_t args)
+{
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  
+  env_del(CAR(args));
+  
+  vm_assign(0, NIL);
 }
 
 /***************************************************************************/
@@ -3685,7 +4334,7 @@ error(unsigned errcode, ...)
 
 /***************************************************************************/
 
-struct {
+const struct {
   obj_t    *cl, *name, *parent;
   unsigned inst_size;
   void     (*inst_init)(obj_t cl, obj_t inst, va_list ap);
@@ -3830,7 +4479,7 @@ struct {
   }
 };
 
-struct {
+const struct {
   obj_t *obj;
   char  *str;
 } init_str_tbl[] = {
@@ -3893,10 +4542,10 @@ struct {
     { &consts.str.main,        "main" },
     { &consts.str.mapc,        "map:" },
     { &consts.str.minus,       "minus" },
-    { &consts.str.mode,        "#mode" },
+    { &consts.str.mode,        "mode" },
     { &consts.str.modc,        "mod:" },
     { &consts.str.multc,       "mult:" },
-    { &consts.str.name,        "#name" },
+    { &consts.str.name,        "name" },
     { &consts.str.new,         "new" },
     { &consts.str.newc,        "new:" },
     { &consts.str.newc_modec,  "new:mode:" },
@@ -3905,7 +4554,7 @@ struct {
     { &consts.str.nil,         "#nil" },
     { &consts.str.not,         "not" },
     { &consts.str.orc,         "or:" },
-    { &consts.str.parent,      "#parent" },
+    { &consts.str.parent,      "parent" },
     { &consts.str.path,        "path" },
     { &consts.str.pquote,      "pquote" },
     { &consts.str.print,       "print" },
@@ -3938,7 +4587,7 @@ struct {
 #endif
 };
 
-struct {
+const struct {
   obj_t *cl, *sel;
   void  (*func)(unsigned, obj_t);
 } init_cl_method_tbl[] = {
@@ -3958,7 +4607,24 @@ struct {
   { &consts.cl.integer, &consts.str.newc, cm_integer_new },
 
   { &consts.cl._float, &consts.str.new,  cm_float_new },
-  { &consts.cl._float, &consts.str.newc, cm_float_new }
+  { &consts.cl._float, &consts.str.newc, cm_float_new },
+
+  { &consts.cl.pair, &consts.str.newc, cm_pair_new },
+
+  { &consts.cl.list, &consts.str.new,  cm_list_new },
+  { &consts.cl.list, &consts.str.newc, cm_list_new },
+
+  { &consts.cl.method_call, &consts.str.newc, cm_method_call_new },
+
+  { &consts.cl.array, &consts.str.newc, cm_array_new },
+
+  { &consts.cl.dict, &consts.str.new, cm_dict_new },
+
+  { &consts.cl.env, &consts.str.newc,      cm_env_new },
+  { &consts.cl.env, &consts.str.newc_putc, cm_env_new_put },
+  { &consts.cl.env, &consts.str.atc,       cm_env_at },
+  { &consts.cl.env, &consts.str.atc_putc,  cm_env_at_put },
+  { &consts.cl.env, &consts.str.deletec,   cm_env_del }
 }, init_inst_method_tbl[] = {
   { &consts.cl.metaclass, &consts.str.name,               cm_class_name },
   { &consts.cl.metaclass, &consts.str.tostring,           cm_class_name },
@@ -4032,6 +4698,15 @@ struct {
   { &consts.cl.string, &consts.str.splitc,      cm_string_split },
   { &consts.cl.string, &consts.str.pquote,      cm_string_pquote },
 
+  { &consts.cl.dptr, &consts.str.car,      cm_dptr_car },
+  { &consts.cl.dptr, &consts.str.cdr,      cm_dptr_cdr },
+  { &consts.cl.dptr, &consts.str.hash,     cm_dptr_hash },
+  { &consts.cl.dptr, &consts.str.equalsc,  cm_dptr_equals },
+
+  { &consts.cl.pair, &consts.str.eval,     cm_pair_eval },
+  { &consts.cl.pair, &consts.str.tostring, cm_pair_tostring },
+  { &consts.cl.pair, &consts.str.atc,      cm_pair_at },
+  
   { &consts.cl.list, &consts.str.length,        cm_list_len },
   { &consts.cl.list, &consts.str.tostring,      cm_list_tostring },
   { &consts.cl.list, &consts.str.eval,          cm_list_eval },
@@ -4046,7 +4721,21 @@ struct {
   { &consts.cl.list, &consts.str.filterc,       cm_list_filter },
   { &consts.cl.list, &consts.str.reducec_initc, cm_list_reduce },
 
-  { &consts.cl.method_call, &consts.str.eval, cm_method_call_eval }
+  { &consts.cl.method_call, &consts.str.tostring, cm_method_call_tostring },
+  { &consts.cl.method_call, &consts.str.eval,     cm_method_call_eval },
+
+  { &consts.cl.block, &consts.str.evalc,    cm_block_eval },
+  { &consts.cl.block, &consts.str.tostring, cm_block_tostring },
+
+  { &consts.cl.array, &consts.str.atc,      cm_array_at },
+  { &consts.cl.array, &consts.str.atc_putc, cm_array_at_put },
+  { &consts.cl.array, &consts.str.tostring, cm_array_tostring },
+  
+  { &consts.cl.dict, &consts.str.atc,      cm_dict_at },
+  { &consts.cl.dict, &consts.str.atc_putc, cm_dict_at_put },
+  { &consts.cl.dict, &consts.str.deletec,  cm_dict_del },
+  { &consts.cl.dict, &consts.str.keys,     cm_dict_keys },
+  { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring }
 };
 
 
@@ -4159,6 +4848,8 @@ init(void)
 		*init_cl_tbl[i].cl
 		);
   }
+
+  module_cur = module_main;
 
   /* Step 7. Fix up class module membership */
 

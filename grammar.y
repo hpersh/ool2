@@ -250,7 +250,7 @@ atom:
 pair:
 	TOK_LPAREN expr TOK_COMMA expr TOK_RPAREN
 {
-  m_cons($2, $4);
+  m_pair_new($2, $4);
 
   vm_push(0);
   $$ = R0;
@@ -361,7 +361,7 @@ method_call:
   m_method_call_new(R0);
   m_cons(R0, R1);
   vm_assign(1, R0);
-  m_string_new(1, 4, "at:");
+  m_string_new(1, 3, "at:");
   m_cons(R0, R1);
   m_cons(consts.str.environment, R0);
   m_method_call_new(R0);
