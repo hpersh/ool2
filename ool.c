@@ -1120,9 +1120,6 @@ cm_class_new(unsigned argc, obj_t args)
     dict_at_put(CLASS(R1)->inst_vars, CAR(inst_vars), R0);
   }
 
-  m_code_method_new(cm_object_new);
-  dict_at_put(CLASS(R1)->cl_methods, consts.str.new, R0);
-
   dict_at_put(OBJ(MODULE(module_cur)->base), name, R1);
 
   vm_assign(0, R1);
@@ -4673,6 +4670,8 @@ const struct {
   { &consts.cl.metaclass, &consts.str.instance_methods,       cm_metaclass_inst_methods },
   { &consts.cl.metaclass, &consts.str.instance_variables,     cm_metaclass_inst_vars },
   { &consts.cl.metaclass, &consts.str.newc_parentc_instance_variablesc, cm_class_new },
+
+  { &consts.cl.object, &consts.str.new,  cm_object_new },
 
   { &consts.cl.boolean, &consts.str.new,  cm_boolean_new },
   { &consts.cl.boolean, &consts.str.newc, cm_boolean_new },
