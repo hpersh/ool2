@@ -111,6 +111,7 @@ void m_cons(obj_t car, obj_t cdr);
 void _list_concat(obj_t *li, obj_t el);
 void m_list_concat(obj_t *li, obj_t el);
 void m_method_call_new(obj_t list);
+void _method_call_concat(obj_t mc, obj_t el);
 void m_block_new(obj_t list);
 void m_array_new(unsigned size);
 void m_string_dict_new(unsigned size);

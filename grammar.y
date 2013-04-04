@@ -371,6 +371,22 @@ method_call:
   vm_push(0);
   $$ = R0;
 }
+	| TOK_LSQBR dsym TOK_EQUAL expr TOK_RSQBR
+{
+  vm_push(1);
+
+  m_cons($4, NIL);
+  vm_assign(1, R0);
+  m_string_new(1, 4, "put:");
+  m_cons(R0, R1);
+  _method_call_concat($2, R0);
+  vm_assign(0, $2);
+
+  vm_pop(1);
+
+  vm_push(0);
+  $$ = R0;
+}
         | TOK_LSQBR expr sym TOK_RSQBR
 {
   m_cons($3, NIL);

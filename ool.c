@@ -3438,6 +3438,12 @@ m_method_call_new(obj_t li)
 }
 
 void
+_method_call_concat(obj_t mc, obj_t el)
+{
+  _list_concat(&METHOD_CALL(mc)->list, el);
+}
+
+void
 cm_method_call_new(unsigned argc, obj_t args)
 {
   obj_t arg;
