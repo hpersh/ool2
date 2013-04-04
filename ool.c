@@ -877,6 +877,15 @@ m_method_call(struct frame_method_call *mcfrp, obj_t sel, unsigned argc, obj_t a
     }
   }
 
+  if (mcfrp) {
+    cl = inst_of(recvr);
+    if (cl == NIL || cl == consts.cl.metaclass) {
+      cl = recvr;
+      mcfrp->args = CDR(args);
+    }
+    mcfrp->cl = cl;
+  }
+
   error(ERR_NO_METHOD);
 
  done:
@@ -1256,7 +1265,7 @@ cm_object_tostring(unsigned argc, obj_t args)
   if (argc != 1)  error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (recvr == NIL) {
-    vm_assign(0, consts.str.nil);
+    m_string_new(1, 2, "()");
     return;
   }
   
