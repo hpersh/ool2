@@ -311,6 +311,7 @@ enum {
   ERR_NO_METHOD,
   ERR_BAD_FORM,
   ERR_NOT_BOUND,
+  ERR_NO_ATTR,
   ERR_OVF,
   ERR_IDX_RANGE,
   ERR_IDX_RANGE_2,
@@ -326,6 +327,7 @@ const char * const error_msgs[] = {
   "Invalid value",
   "Invalid method",
   "No such method",
+  "No such attribute",
   "Bad form",
   "Symbol not bound",
   "Arithmetic overflow",
@@ -864,7 +866,7 @@ m_method_call(struct frame_method_call *mcfrp, obj_t sel, unsigned argc, obj_t a
   if (cl == NIL || cl == consts.cl.metaclass) {
     for (cl = recvr; cl; cl = CLASS(cl)->parent) {
       if (p = dict_at(CLASS(cl)->cl_methods, sel)) {
-	method_run(mcfrp, cl, sel, CDR(p), argc - 1, CDR(args));
+	method_run(mcfrp, cl, sel, CDR(p), argc, args);
 	goto done;
       }
     }
@@ -879,11 +881,9 @@ m_method_call(struct frame_method_call *mcfrp, obj_t sel, unsigned argc, obj_t a
 
   if (mcfrp) {
     cl = inst_of(recvr);
-    if (cl == NIL || cl == consts.cl.metaclass) {
-      cl = recvr;
-      mcfrp->args = CDR(args);
+    if (!(cl == NIL || cl == consts.cl.metaclass)) {
+      mcfrp->cl = cl;
     }
-    mcfrp->cl = cl;
   }
 
   error(ERR_NO_METHOD);
@@ -958,7 +958,7 @@ inst_walk_metaclass(obj_t inst, void (*func)(obj_t))
 void
 cm_metaclass_name(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
 
   vm_assign(0, CLASS(consts.cl.metaclass)->name);
 }
@@ -966,7 +966,7 @@ cm_metaclass_name(unsigned argc, obj_t args)
 void
 cm_metaclass_parent(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
 
   vm_assign(0, CLASS(consts.cl.metaclass)->parent);
 }
@@ -974,7 +974,7 @@ cm_metaclass_parent(unsigned argc, obj_t args)
 void
 cm_metaclass_cl_methods(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
 
   vm_assign(0, CLASS(consts.cl.metaclass)->cl_methods);
 }
@@ -982,7 +982,7 @@ cm_metaclass_cl_methods(unsigned argc, obj_t args)
 void
 cm_metaclass_cl_vars(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
   
   vm_assign(0, CLASS(consts.cl.metaclass)->cl_vars);
 }
@@ -990,7 +990,7 @@ cm_metaclass_cl_vars(unsigned argc, obj_t args)
 void
 cm_metaclass_inst_methods(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
   
   vm_assign(0, NIL);
 }
@@ -998,7 +998,7 @@ cm_metaclass_inst_methods(unsigned argc, obj_t args)
 void
 cm_metaclass_inst_vars(unsigned argc, obj_t args)
 {
-  if (argc != 0)  error(ERR_NUM_ARGS);
+  if (argc != 1)  error(ERR_NUM_ARGS);
 
   /* Must be hard-coded, because
      inst_vars(#Metaclass) only has mutable ones
@@ -1070,7 +1070,7 @@ inst_walk_user(obj_t cl, obj_t inst, void (*func)(obj_t))
   obj_t    *p;
 
   ofs = CLASS(CLASS(cl)->parent)->inst_size;
-  for (p = (obj_t *)((unsigned char *) inst + ofs); ofs < CLASS(inst)->inst_size; ofs += sizeof(obj_t)) {
+  for (p = (obj_t *)((unsigned char *) inst + ofs); ofs < CLASS(cl)->inst_size; ofs += sizeof(obj_t), ++p) {
     (*func)(*p);
   }
 
@@ -1083,17 +1083,21 @@ inst_free_user(obj_t cl, obj_t inst)
   inst_free_parent(cl, inst);
 }
 
+void cm_object_new(unsigned argc, obj_t args);
+
 void
 cm_class_new(unsigned argc, obj_t args)
 {
   obj_t    name, parent, inst_vars;
   unsigned ofs;
 
-  vm_push(1);
-
+  if (argc != 4)  error(ERR_NUM_ARGS);
+  args = CDR(args);
   name = CAR(args);    args = CDR(args);
   parent = CAR(args);  args = CDR(args);
   inst_vars = CAR(args);
+
+  vm_push(1);
 
   m_class_new(name, parent, module_cur);
   vm_assign(1, R0);
@@ -1115,9 +1119,13 @@ cm_class_new(unsigned argc, obj_t args)
     m_integer_new(ofs);
     dict_at_put(CLASS(R1)->inst_vars, CAR(inst_vars), R0);
   }
-  vm_assign(0, R1);
 
-  dict_at_put(OBJ(MODULE(module_cur)->base), name, R0);
+  m_code_method_new(cm_object_new);
+  dict_at_put(CLASS(R1)->cl_methods, consts.str.new, R0);
+
+  dict_at_put(OBJ(MODULE(module_cur)->base), name, R1);
+
+  vm_assign(0, R1);
 
   vm_pop(1);
 }
@@ -1227,6 +1235,18 @@ inst_free_object(obj_t cl, obj_t inst)
 }
 
 void
+cm_object_new(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                                error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.metaclass))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_inst_alloc(recvr);
+}
+
+void
 cm_object_quote(unsigned argc, obj_t args)
 {
   if (argc != 1)  error(ERR_NUM_ARGS);
@@ -1304,6 +1324,59 @@ cm_object_append(unsigned argc, obj_t args)
   if (!(arg == NIL || is_kind_of(arg, consts.cl.list)))  error(ERR_INVALID_ARG, arg);
   
   vm_assign(0, arg);
+}
+
+obj_t *
+obj_attr_find(obj_t inst, obj_t s)
+{
+  obj_t cl, p;
+
+  for (cl = inst_of(inst); cl; cl = CLASS(cl)->parent) {
+    if (p = dict_at(CLASS(cl)->inst_vars, s)) {
+      return ((obj_t *)((char *) inst + INTEGER(CDR(p))->val));
+    }
+  }
+
+  return (0);
+}
+
+void
+cm_object_at(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg, *p;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  arg   = CAR(CDR(args));
+  
+  if (p = obj_attr_find(recvr, arg)) {
+    vm_assign(0, *p);
+    return;
+  }
+
+  error(ERR_NO_ATTR, recvr, arg);
+}
+
+void
+cm_object_at_put(unsigned argc, obj_t args)
+{
+  obj_t recvr, k, val, *p;
+
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  args  = CDR(args);
+  k     = CAR(args);
+  args  = CDR(args);
+  val   = CAR(args);
+  
+  if (p = obj_attr_find(recvr, k)) {
+    OBJ_ASSIGN(*p, val);
+
+    vm_assign(0, val);
+    return;
+  }
+
+  error(ERR_NO_ATTR, recvr, k);
 }
 
 /***************************************************************************/
@@ -1387,12 +1460,11 @@ cm_boolean_new(unsigned argc, obj_t args)
   obj_t    arg;
   unsigned bval;
   
-  if (argc < 1) {
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+  if (argc < 2) {
     bval = 0;
-  } else if (argc > 1) {
-    error(ERR_NUM_ARGS);
   } else {
-    arg = CAR(args);
+    arg = CAR(CDR(args));
 
     if (is_kind_of(arg, consts.cl.boolean)) {
       vm_assign(0, arg);
@@ -1574,12 +1646,11 @@ cm_integer_new(unsigned argc, obj_t args)
   obj_t         arg;
   integer_val_t ival;
 
-  if (argc < 1) {
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+  if (argc < 2) {
     ival = 0;
-  } else if (argc > 1) {
-    error(ERR_NUM_ARGS);
   } else {
-    arg = CAR(args);
+    arg = CAR(CDR(args));
 
     if (is_kind_of(arg, consts.cl.boolean)) {
       ival = BOOLEAN(arg)->val != 0;
@@ -2044,12 +2115,11 @@ cm_float_new(unsigned argc, obj_t args)
   obj_t       arg;
   float_val_t fval;
 
-  if (argc < 1) {
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+  if (argc < 2) {
     fval = 0.0;
-  } else if (argc > 1) {
-    error(ERR_NUM_ARGS);
   } else {
-    arg = CAR(args);
+    arg = CAR(CDR(args));
   
     if (is_kind_of(arg, consts.cl.boolean)) {
       fval = BOOLEAN(arg)->val ? 1.0 : 0.0;
@@ -2264,6 +2334,18 @@ m_string_new(unsigned n, ...)
   va_end(ap);
 
   vm_drop();
+}
+
+void
+cm_string_new(unsigned argc, obj_t args)
+{
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+  if (argc == 1) {
+    m_string_new(0);
+    return;
+  }
+
+  m_method_call_1(CAR(CDR(args)), consts.str.tostring);
 }
 
 unsigned
@@ -2745,10 +2827,9 @@ cm_pair_new(unsigned argc, obj_t args)
 {
   obj_t arg, car = NIL, cdr = NIL;
 
-  if (argc > 1) {
-    error(ERR_NUM_ARGS);
-  } else if (argc == 1) {
-    arg = CAR(args);
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+  if (argc ==2) {
+    arg = CAR(CDR(args));
     
     if (is_kind_of(arg, consts.cl.dptr)) {
       car = CAR(arg);
@@ -2901,14 +2982,14 @@ cm_list_new(unsigned argc, obj_t args)
 {
   obj_t arg;
 
-  if (argc == 0) {
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+
+  if (argc == 1) {
     vm_assign(0, NIL);
     return;
   }
   
-  if (argc > 1)  error(ERR_NUM_ARGS);
-
-  arg = CAR(args);
+  arg = CAR(CDR(args));
 
   if (is_kind_of(arg, consts.cl.pair)) {
     m_cons(CDR(arg), NIL);
@@ -3361,8 +3442,8 @@ cm_method_call_new(unsigned argc, obj_t args)
 {
   obj_t arg;
 
-  if (argc != 1)                         error(ERR_NUM_ARGS);
-  arg = CAR(args);
+  if (argc != 2)                         error(ERR_NUM_ARGS);
+  arg = CAR(CDR(args));
   if (!is_kind_of(arg, consts.cl.list))  error(ERR_INVALID_ARG, arg);
 
   m_method_call_new(arg);
@@ -3489,6 +3570,18 @@ m_block_new(obj_t li)
 }
 
 void
+cm_block_new(unsigned argc, obj_t args)
+{
+  obj_t arg;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.list))  error(ERR_INVALID_ARG);
+
+  m_block_new(arg);
+}
+
+void
 cm_block_eval(unsigned argc, obj_t args)
 {
   obj_t recvr, arg, li, p;
@@ -3582,8 +3675,8 @@ cm_array_new(unsigned argc, obj_t args)
 {
   obj_t arg;
 
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  arg = CAR(args);
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  arg = CAR(CDR(args));
 
   if (is_kind_of(arg, consts.cl.integer)) {
     integer_val_t size = INTEGER(arg)->val;
@@ -3890,14 +3983,14 @@ cm_dict_new(unsigned argc, obj_t args)
 {
   obj_t arg;
 
-  if (argc == 0) {
+  if (argc < 1 || argc > 2)  error(ERR_NUM_ARGS);
+
+  if (argc == 1) {
     m_dict_new(m_dict_size_dflt());
     return;
   }
 
-  if (argc > 1)  error(ERR_NUM_ARGS);
-
-  arg = CAR(args);
+  arg = CAR(CDR(args));
 
   if (is_kind_of(arg, consts.cl.integer)) {
     integer_val_t size = INTEGER(arg)->val;
@@ -4234,7 +4327,8 @@ cm_env_new_put(unsigned argc, obj_t args)
 {
   obj_t val;
 
-  if (argc != 2)  error(ERR_NUM_ARGS);
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  args = CDR(args);
 
   env_new_put(CAR(args), val = CAR(CDR(args)));
 
@@ -4246,9 +4340,9 @@ cm_env_new(unsigned argc, obj_t args)
 {
   obj_t val = NIL;
 
-  if (argc != 1)  error(ERR_NUM_ARGS);
+  if (argc != 2)  error(ERR_NUM_ARGS);
 
-  env_new_put(CAR(args), val);
+  env_new_put(CAR(CDR(args)), val);
 
   vm_assign(0, val);
 }
@@ -4258,7 +4352,8 @@ cm_env_at_put(unsigned argc, obj_t args)
 {
   obj_t val;
 
-  if (argc != 2)  error(ERR_NUM_ARGS);
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  args = CDR(args);
 
   env_at_put(CAR(args), val = CAR(CDR(args)));
 
@@ -4268,17 +4363,17 @@ cm_env_at_put(unsigned argc, obj_t args)
 void
 cm_env_at(unsigned argc, obj_t args)
 {
-  if (argc != 1)  error(ERR_NUM_ARGS);
+  if (argc != 2)  error(ERR_NUM_ARGS);
 
-  vm_assign(0, env_at(CAR(args)));
+  vm_assign(0, env_at(CAR(CDR(args))));
 }
 
 void
 cm_env_del(unsigned argc, obj_t args)
 {
-  if (argc != 1)  error(ERR_NUM_ARGS);
+  if (argc != 2)  error(ERR_NUM_ARGS);
   
-  env_del(CAR(args));
+  env_del(CAR(CDR(args)));
   
   vm_assign(0, NIL);
 }
@@ -4361,7 +4456,7 @@ const struct {
   { &consts.cl.object,
     &consts.str.object,
     0,
-    0,
+    sizeof(struct obj),
     inst_init_object,
     inst_walk_object,
     inst_free_object
@@ -4618,6 +4713,8 @@ const struct {
   { &consts.cl._float, &consts.str.new,  cm_float_new },
   { &consts.cl._float, &consts.str.newc, cm_float_new },
 
+  { &consts.cl.string, &consts.str.newc, cm_string_new },
+
   { &consts.cl.pair, &consts.str.newc, cm_pair_new },
 
   { &consts.cl.list, &consts.str.new,  cm_list_new },
@@ -4649,6 +4746,8 @@ const struct {
   { &consts.cl.object, &consts.str.equalsc,     cm_object_eq },
   { &consts.cl.object, &consts.str.tostring,    cm_object_tostring },
   { &consts.cl.object, &consts.str.print,       cm_object_print },
+  { &consts.cl.object, &consts.str.atc,         cm_object_at },
+  { &consts.cl.object, &consts.str.atc_putc,    cm_object_at_put },
 
   { &consts.cl.code_method, &consts.str.evalc, cm_code_method_eval },
 
