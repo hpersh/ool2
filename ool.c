@@ -1155,42 +1155,6 @@ cm_class_parent(unsigned argc, obj_t args)
 }
 
 void
-cm_class_cl_methods(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.metaclass))  error(ERR_INVALID_ARG, recvr);
-  
-  vm_assign(0, CLASS(recvr)->cl_methods);
-}
-
-void
-cm_class_cl_vars(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.metaclass))  error(ERR_INVALID_ARG, recvr);
-  
-  vm_assign(0, CLASS(recvr)->cl_vars);
-}
-
-void
-cm_class_inst_methods(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.metaclass))  error(ERR_INVALID_ARG, recvr);
-  
-  vm_assign(0, CLASS(recvr)->inst_methods);
-}
-
-void
 cm_class_inst_vars(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -4741,9 +4705,6 @@ const struct {
   { &consts.cl.metaclass, &consts.str.name,               cm_class_name },
   { &consts.cl.metaclass, &consts.str.tostring,           cm_class_name },
   { &consts.cl.metaclass, &consts.str.parent,             cm_class_parent },
-  { &consts.cl.metaclass, &consts.str.class_methods,      cm_class_cl_methods },
-  { &consts.cl.metaclass, &consts.str.class_variables,    cm_class_cl_vars },
-  { &consts.cl.metaclass, &consts.str.instance_methods,   cm_class_inst_methods },
   { &consts.cl.metaclass, &consts.str.instance_variables, cm_class_inst_vars },
 
   { &consts.cl.object, &consts.str.quote,       cm_object_quote },
@@ -4937,6 +4898,13 @@ init(void)
 		R0
 		);
   }
+
+  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_methods));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_methods, R0);
+  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_vars));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_variables, R0);
+  m_integer_new(FIELD_OFS(struct inst_metaclass, inst_methods));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.instance_methods, R0);
 
   /* Step 6. Create main module */
 
