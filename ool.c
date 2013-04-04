@@ -1958,7 +1958,7 @@ cm_integer_range_init_step(unsigned argc, obj_t args)
 {
   obj_t recvr, arg0, arg1;
   
-  if (argc != 2)                              error(ERR_NUM_ARGS);
+  if (argc != 3)                              error(ERR_NUM_ARGS);
   recvr = CAR(args);  args = CDR(args);
   if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
   arg0 = CAR(args);  args = CDR(args);
