@@ -1,4 +1,5 @@
-CFLAGS	= -g -DDEBUG
+#CFLAGS	= -g -DDEBUG
+CFLAGS  = -O2
 CC      = gcc $(CFLAGS)
 
 #all: ool socket.so math.so

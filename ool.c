@@ -1330,46 +1330,31 @@ obj_attr_find(obj_t inst, obj_t s)
     }
   }
 
+  error(ERR_NO_ATTR);
+
   return (0);
 }
 
 void
 cm_object_at(unsigned argc, obj_t args)
 {
-  obj_t recvr, arg, *p;
-
   if (argc != 2)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  arg   = CAR(CDR(args));
   
-  if (p = obj_attr_find(recvr, arg)) {
-    vm_assign(0, *p);
-    return;
-  }
-
-  error(ERR_NO_ATTR, recvr, arg);
+  vm_assign(0, *obj_attr_find(CAR(args), CAR(CDR(args))));
 }
 
 void
 cm_object_at_put(unsigned argc, obj_t args)
 {
-  obj_t recvr, k, val, *p;
+  obj_t recvr, k, val;;
 
   if (argc != 3)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  args  = CDR(args);
-  k     = CAR(args);
-  args  = CDR(args);
+  recvr = CAR(args);  args  = CDR(args);
+  k     = CAR(args);  args  = CDR(args);
   val   = CAR(args);
   
-  if (p = obj_attr_find(recvr, k)) {
-    OBJ_ASSIGN(*p, val);
-
-    vm_assign(0, val);
-    return;
-  }
-
-  error(ERR_NO_ATTR, recvr, k);
+  OBJ_ASSIGN(*obj_attr_find(recvr, k), val);
+  vm_assign(0, val);
 }
 
 /***************************************************************************/
