@@ -666,10 +666,9 @@ void
 vm_pushl(obj_t obj)
 {
   VM_STACK_CHECK_PUSH(1);
+  VM_STATS_UPDATE_PUSH(1);
 
   *--sp = obj_retain(obj);
-
-  VM_STATS_UPDATE_PUSH(1);
 }
 
 void
@@ -687,10 +686,9 @@ vm_pushm(unsigned src, unsigned n)
 
   ASSERT_REG_VALID(src + n - 1);
   VM_STACK_CHECK_PUSH(n);
+  VM_STATS_UPDATE_PUSH(n);
 
   for (p = &REG(src); n; --n, ++p)  *--sp = obj_retain(*p);
-
-  VM_STATS_UPDATE_PUSH(n);
 }
 
 void
@@ -698,11 +696,10 @@ vm_pop(unsigned dst)
 {
   ASSERT_REG_VALID(dst);
   VM_STACK_CHECK_POP(1);
+  VM_STATS_UPDATE_POP(1);
 
   _obj_assign(&REG(dst), *sp);
   ++sp;
-
-  VM_STATS_UPDATE_POP(1);
 }
 
 void
@@ -712,31 +709,28 @@ vm_popm(unsigned dst, unsigned n)
 
   ASSERT_REG_VALID(dst + n - 1);
   VM_STACK_CHECK_POP(n);
+  VM_STATS_UPDATE_POP(n);
 
   for (p = &REG(dst + n - 1); n; --n, --p, ++sp)  _obj_assign(p, *sp);
-
-  VM_STATS_UPDATE_POP(n);
 }
 
 void
 vm_drop(void)
 {
   VM_STACK_CHECK_POP(1);
+  VM_STATS_UPDATE_POP(1);
 
   obj_release(*sp);
   ++sp;
-
-  VM_STATS_UPDATE_POP(1);
 }
 
 void
 vm_dropn(unsigned n)
 {
   VM_STACK_CHECK_POP(n);
+  VM_STATS_UPDATE_POP(n);
 
   for ( ; n; --n, ++sp)  obj_release(*sp);
-
-  VM_STATS_UPDATE_POP(n);
 }
 
 /***************************************************************************/
@@ -4420,9 +4414,21 @@ cm_env_del(unsigned argc, obj_t args)
 /* Class: System */
 
 void
+zexit(int code)
+{
+#ifndef NDEBUG
+  collect();			/* Check consistency */
+
+  stats_print();
+#endif
+
+  exit(code);
+}
+
+void
 cm_system_exit(unsigned argc, obj_t args)
 {
-  exit(0);
+  zexit(0);
 }
 
 /***************************************************************************/
@@ -4769,7 +4775,9 @@ const struct {
   { &consts.cl.env, &consts.str.newc_putc, cm_env_new_put },
   { &consts.cl.env, &consts.str.atc,       cm_env_at },
   { &consts.cl.env, &consts.str.atc_putc,  cm_env_at_put },
-  { &consts.cl.env, &consts.str.deletec,   cm_env_del }
+  { &consts.cl.env, &consts.str.deletec,   cm_env_del },
+
+  { &consts.cl.system, &consts.str.exit,  cm_system_exit }
 }, init_inst_method_tbl[] = {
   { &consts.cl.metaclass, &consts.str.name,               cm_class_name },
   { &consts.cl.metaclass, &consts.str.tostring,           cm_class_name },
@@ -5077,11 +5085,7 @@ main(int argc, char **argv)
 
   } FRAME_MODULE_END;
 
-#ifndef NDEBUG
-  collect();			/* Check consistency */
+  zexit(0);
 
-  stats_print();
-#endif
-
-  return (0);
+  return (0);			/* Suppress warning */
 }
