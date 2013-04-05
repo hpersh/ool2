@@ -62,7 +62,7 @@ struct {
     obj_t _break;
     obj_t car, cdr, chr, class_methods, class_variables, _continue;
     obj_t deletec, divc;
-    obj_t equalsc, eval, evalc, exit, exitc;
+    obj_t eof, equalsc, eval, evalc, exit, exitc;
     obj_t _false, filterc, foreachc;
     obj_t gec, gtc;
     obj_t hash;
@@ -77,7 +77,7 @@ struct {
     obj_t range, rangec, rangec_stepc, readc, readln, reducec_initc, _return, rindexc;
     obj_t _stderr, _stdin, _stdout, splicec, splitc, subc;
     obj_t tostring, tostringc, _true;
-    obj_t whilec;
+    obj_t whilec, writec;
     obj_t xorc;
 #ifndef NDEBUG
     obj_t assert;

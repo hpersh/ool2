@@ -4201,6 +4201,8 @@ m_fqmodname(obj_t mod)
 void
 cl_init_file(void)
 {
+  vm_push(0);
+
   m_string_new(1, 2, "r+");
   m_file_new(consts.str._stdin, R0, stdin);
   dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
@@ -4211,6 +4213,7 @@ cl_init_file(void)
   m_file_new(consts.str._stderr, R0, stderr);
   dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
 
+  vm_pop(0);
 }
 
 void
@@ -4307,9 +4310,13 @@ cm_file_new(unsigned argc, obj_t args)
 
   if (argc != 3)  error(ERR_NUM_ARGS);
   args = CDR(args);  filename = CAR(args);
-  if (!is_kind_of(filename, consts.cl.string))  error(ERR_INVALID_ARG, filename);
+  if (!is_kind_of(filename, consts.cl.string)
+      || string_len(filename) == 0
+      )  error(ERR_INVALID_ARG, filename);
   args = CDR(args);  mode = CAR(args);
-  if (!is_kind_of(mode, consts.cl.string))  error(ERR_INVALID_ARG, mode);
+  if (!is_kind_of(mode, consts.cl.string)
+      || string_len(mode) == 0
+      )  error(ERR_INVALID_ARG, mode);
 
   fp = fopen(STRING(filename)->data, STRING(mode)->data);
   if (fp == 0) {
@@ -4317,6 +4324,129 @@ cm_file_new(unsigned argc, obj_t args)
   }
   
   m_file_new(filename, mode, fp);
+}
+
+void
+cm_file_name(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, _FILE(recvr)->name);
+}
+
+void
+cm_file_mode(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  vm_assign(0, _FILE(recvr)->mode);
+}
+
+void
+cm_file_read(unsigned argc, obj_t args)
+{
+  obj_t         recvr, arg;
+  FILE          *fp;
+  integer_val_t len;
+  char          *p;
+  unsigned      i;
+  
+  if (argc != 2)                            error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))   error(ERR_INVALID_ARG, recvr);
+  fp = _FILE(recvr)->fp;
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))  error(ERR_INVALID_ARG, arg);
+  len = INTEGER(arg)->val;
+  if (len < 0)                              error(ERR_INVALID_ARG, arg);
+
+  vm_inst_alloc(consts.cl.string);
+  inst_init(R0, (unsigned) len);
+
+  for (i = 0, p = STRING(R0)->data; len; --len, ++p, ++i) {
+    int c = fgetc(fp);
+    
+    if (c == EOF)  break;
+    
+    *p = c;
+  }
+
+  m_string_new(1, i, STRING(R0)->data);
+}
+
+void
+cm_file_readln(unsigned argc, obj_t args)
+{
+  obj_t     recvr;
+  FILE      *fp;
+  char      *p;
+  unsigned  i;
+  
+  if (argc != 1)                           error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+  fp = _FILE(recvr)->fp;
+
+  vm_push(1);
+  
+  vm_inst_alloc(consts.cl.string);
+  inst_init(R0, 32);
+  
+  for (i = 0, p = STRING(R0)->data; ; ++p, ++i) {
+    int c = fgetc(fp);
+    
+    if (c == EOF || c == '\n')  break;
+    
+    if (i >= string_len(R0)) {
+      vm_assign(1, R0);
+      vm_inst_alloc(consts.cl.string);
+      inst_init(R0, string_len(R1) << 1);
+      memcpy(STRING(R0)->data, STRING(R1)->data, i);
+      p = STRING(R0)->data + i;
+    }
+    
+    *p = c;
+  }
+  
+  m_string_new(1, i, STRING(R0)->data);
+  
+  vm_pop(1);
+}
+
+void
+cm_file_write(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.string))  error(ERR_INVALID_ARG, arg);
+
+  if (string_len(arg) > 0)  fputs(STRING(arg)->data, _FILE(recvr)->fp);
+
+  vm_assign(0, recvr);
+}
+
+void
+cm_file_eof(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  m_boolean_new(feof(_FILE(recvr)->fp));
 }
 
 /***************************************************************************/
@@ -4727,6 +4857,7 @@ const struct {
     { &consts.str.deletec,     "delete:" },
     { &consts.str.divc,        "div:" },
     { &consts.str.equalsc,     "equals:" },
+    { &consts.str.eof,         "eof" },
     { &consts.str.eval,        "eval" },
     { &consts.str.evalc,       "eval:" },
     { &consts.str.exit,        "exit" },
@@ -4787,6 +4918,7 @@ const struct {
     { &consts.str.tostringc,   "tostring:" },
     { &consts.str._true,       "#true" },
     { &consts.str.whilec,      "while:" },
+    { &consts.str.writec,      "write:" },
     { &consts.str.xorc,        "xor:" }
 #ifndef NDEBUG
     ,
@@ -4832,6 +4964,8 @@ const struct {
   { &consts.cl.array, &consts.str.newc, cm_array_new },
 
   { &consts.cl.dict, &consts.str.new, cm_dict_new },
+
+  { &consts.cl.file, &consts.str.newc_modec, cm_file_new },
 
   { &consts.cl.env, &consts.str.newc,      cm_env_new },
   { &consts.cl.env, &consts.str.newc_putc, cm_env_new_put },
@@ -4949,7 +5083,14 @@ const struct {
   { &consts.cl.dict, &consts.str.atc_putc, cm_dict_at_put },
   { &consts.cl.dict, &consts.str.deletec,  cm_dict_del },
   { &consts.cl.dict, &consts.str.keys,     cm_dict_keys },
-  { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring }
+  { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring },
+
+  { &consts.cl.file, &consts.str.name,   cm_file_name },
+  { &consts.cl.file, &consts.str.mode,   cm_file_mode },
+  { &consts.cl.file, &consts.str.readc,  cm_file_read },
+  { &consts.cl.file, &consts.str.readln, cm_file_readln },
+  { &consts.cl.file, &consts.str.writec, cm_file_write },
+  { &consts.cl.file, &consts.str.eof,    cm_file_eof }
 };
 
 
