@@ -643,15 +643,33 @@ vm_assign(unsigned dst, obj_t val)
   OBJ_ASSIGN(REG(dst), val);
 }
 
-#define VM_STACK_CHECK_UP(n)    do { if ((sp - ((n) + 8)) < stack)  error(ERR_STACK_OVF); } while (0)
-#define VM_STACK_CHECK_DOWN(n)  HARD_ASSERT((sp + (n)) <= stack_end)
+#define VM_STACK_CHECK_PUSH(n) \
+  do { if ((sp - ((n) + 8)) < stack)  error(ERR_STACK_OVF); } while (0)
+#define VM_STACK_CHECK_POP(n) \
+  HARD_ASSERT((sp + (n)) <= stack_end)
+
+#ifndef NDEBUG
+#define VM_STATS_UPDATE_PUSH(n)						\
+  do {									\
+    if ((stats.vm.stack_depth += (n)) > stats.vm.stack_depth_max) {	\
+      stats.vm.stack_depth_max = stats.vm.stack_depth;			\
+    }									\
+  } while (0)
+#define VM_STATS_UPDATE_POP(n) \
+  (stats.vm.stack_depth -= (n))
+#else
+#define VM_STATS_UPDATE_PUSH(n)
+#define VM_STATS_UPDATE_POP(n)
+#endif
 
 void
 vm_pushl(obj_t obj)
 {
-  VM_STACK_CHECK_UP(1);
+  VM_STACK_CHECK_PUSH(1);
 
   *--sp = obj_retain(obj);
+
+  VM_STATS_UPDATE_PUSH(1);
 }
 
 void
@@ -668,19 +686,23 @@ vm_pushm(unsigned src, unsigned n)
   obj_t *p;
 
   ASSERT_REG_VALID(src + n - 1);
-  VM_STACK_CHECK_UP(n);
+  VM_STACK_CHECK_PUSH(n);
 
   for (p = &REG(src); n; --n, ++p)  *--sp = obj_retain(*p);
+
+  VM_STATS_UPDATE_PUSH(n);
 }
 
 void
 vm_pop(unsigned dst)
 {
   ASSERT_REG_VALID(dst);
-  VM_STACK_CHECK_DOWN(1);
+  VM_STACK_CHECK_POP(1);
 
   _obj_assign(&REG(dst), *sp);
   ++sp;
+
+  VM_STATS_UPDATE_POP(1);
 }
 
 void
@@ -689,26 +711,32 @@ vm_popm(unsigned dst, unsigned n)
   obj_t *p;
 
   ASSERT_REG_VALID(dst + n - 1);
-  VM_STACK_CHECK_DOWN(n);
+  VM_STACK_CHECK_POP(n);
 
   for (p = &REG(dst + n - 1); n; --n, --p, ++sp)  _obj_assign(p, *sp);
+
+  VM_STATS_UPDATE_POP(n);
 }
 
 void
 vm_drop(void)
 {
-  VM_STACK_CHECK_DOWN(1);
+  VM_STACK_CHECK_POP(1);
 
   obj_release(*sp);
   ++sp;
+
+  VM_STATS_UPDATE_POP(1);
 }
 
 void
 vm_dropn(unsigned n)
 {
-  VM_STACK_CHECK_DOWN(n);
+  VM_STACK_CHECK_POP(n);
 
   for ( ; n; --n, ++sp)  obj_release(*sp);
+
+  VM_STATS_UPDATE_POP(n);
 }
 
 /***************************************************************************/
