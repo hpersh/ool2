@@ -1,0 +1,28 @@
+README
+
+DESIGN GOALS
+
+Minimalism
+Regularity
+Everything is a first-class object
+Functional programming
+Borrowing
+- Smalltalk: method invocation style
+- Lisp: lists, car and cdr, NIL
+- C++: comments
+- FORTH: prompt
+
+ARCHITECTURE
+
+Lightweight virtual machine
+
+Infrastructure
+
+TODO
+
+- Files
+- Batch mode
+- Modules
+- Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
+  white space terminates it, and subunits (which can be arbitrary characters, i.e. arbitrary expressions)
+  are separated by periods?  Or xxx@yyy@zzz?
