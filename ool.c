@@ -42,6 +42,7 @@ struct inst_metaclass {
 #define CLASS(x)    ((struct inst_metaclass *)(x))
 void inst_walk_metaclass(obj_t inst, void (*func)(obj_t));
 unsigned is_subclass_of(obj_t cl1, obj_t cl2);
+void m_fqclname(obj_t cl);
 
 struct inst_code_method {
   struct obj base[1];
@@ -123,6 +124,7 @@ struct inst_module {
   void             *ptr;	/* Cookie from dl_open() */
 };
 #define MODULE(x)  ((struct inst_module *)(x))
+void m_fqmodname(obj_t mod);
 
 struct inst_file {
   struct obj base[1];
@@ -1128,6 +1130,27 @@ cm_class_new(unsigned argc, obj_t args)
 }
 
 void
+m_fqclname(obj_t cl)
+{
+    obj_t s;
+
+    vm_push(0);
+
+    s = CLASS(cl)->name;
+    m_fqmodname(CLASS(cl)->module);
+    if (string_len(R0) == 0) {
+      vm_assign(0, s);
+    } else {
+      m_string_new(3, string_len(R0), STRING(R0)->data,
+		      1, ".",
+		      string_len(s), STRING(s)->data
+		   );
+    }
+
+    vm_drop();
+}
+
+void
 cm_class_name(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -1136,7 +1159,7 @@ cm_class_name(unsigned argc, obj_t args)
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.metaclass))  error(ERR_INVALID_ARG, recvr);
   
-  vm_assign(0, CLASS(recvr)->name);
+  m_fqclname(recvr);
 }
 
 void
@@ -3861,7 +3884,7 @@ void
 dict_const_chk(obj_t key)
 {
   if (inst_of(key) == consts.cl.string
-      && STRING(key)->size > 0
+      && string_len(key) > 0
       && STRING(key)->data[0] == '#'
       ) {
     error(ERR_CONST);
@@ -4104,6 +4127,31 @@ m_module_new(obj_t name, obj_t parent)
   inst_init(R0, name, parent, string_hash, string_equal, 32);
 
   vm_drop();
+}
+
+void
+m_fqmodname(obj_t mod)
+{
+    obj_t p, s;
+
+    vm_push(0);
+
+    m_string_new(0);
+    for ( ; p = MODULE(mod)->parent; mod = p) {
+	s = MODULE(mod)->name;
+
+	if (string_len(R0) == 0) {
+	    vm_assign(0, s);
+	    continue;
+	}
+
+	m_string_new(3, string_len(s), STRING(s)->data,
+		        1, ".",
+		        string_len(R0), STRING(R0)->data
+		     );
+    }
+
+    vm_drop();
 }
 
 /***************************************************************************/
