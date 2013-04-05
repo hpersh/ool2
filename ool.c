@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <setjmp.h>
+#include <errno.h>
 #include <assert.h>
 
 #include "ool.h"
@@ -318,6 +319,7 @@ enum {
   ERR_IDX_RANGE,
   ERR_IDX_RANGE_2,
   ERR_CONST,
+  ERR_FILE_OPEN_FAIL,
   ERR_ASSERT_FAIL
 };
 
@@ -336,6 +338,7 @@ const char * const error_msgs[] = {
   "Index out of range",
   "Index out of range",
   "Write constant",
+  "File open failed",
   "Assertion failed"
 };
 
@@ -960,6 +963,21 @@ m_method_call_3(obj_t sel, obj_t recvr, obj_t arg1, obj_t arg2)
 /* Metaclass */
 
 void
+metaclass_init(void)
+{
+  vm_push(0);
+
+  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_methods));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_methods, R0);
+  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_vars));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_variables, R0);
+  m_integer_new(FIELD_OFS(struct inst_metaclass, inst_methods));
+  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.instance_methods, R0);
+
+  vm_pop(0);
+}
+
+void
 _inst_walk_metaclass(obj_t inst, void (*func)(obj_t))
 {
   (*func)(CLASS(inst)->name);
@@ -1358,11 +1376,17 @@ obj_attr_find(obj_t inst, obj_t s)
 }
 
 void
+m_obj_at(obj_t inst, obj_t k)
+{
+  vm_assign(0, *obj_attr_find(inst, k));
+}
+
+void
 cm_object_at(unsigned argc, obj_t args)
 {
   if (argc != 2)  error(ERR_NUM_ARGS);
   
-  vm_assign(0, *obj_attr_find(CAR(args), CAR(CDR(args))));
+  m_obj_at(CAR(args), CAR(CDR(args)));
 }
 
 void
@@ -4175,6 +4199,21 @@ m_fqmodname(obj_t mod)
 /* Class: File */
 
 void
+cl_init_file(void)
+{
+  m_string_new(1, 2, "r+");
+  m_file_new(consts.str._stdin, R0, stdin);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stdout, R0, stdout);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdout, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stderr, R0, stderr);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
+
+}
+
+void
 inst_init_file(obj_t cl, obj_t inst, va_list ap)
 {
   OBJ_ASSIGN(_FILE(inst)->name, va_arg(ap, obj_t));
@@ -4213,13 +4252,13 @@ m_file_new(obj_t name, obj_t mode, FILE *fp)
 }
 
 FILE *
-m_file_stdin(void)
+file_stdin(void)
 {
   FILE *result;
 
   vm_push(0);
 
-  m_method_call_1(consts.str._stdin, consts.cl.file);
+  m_obj_at(consts.cl.file, consts.str._stdin);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
   result = _FILE(R0)->fp;
 
@@ -4229,13 +4268,13 @@ m_file_stdin(void)
 } 
 
 FILE *
-m_file_stdout(void)
+file_stdout(void)
 {
   FILE *result;
 
   vm_push(0);
 
-  m_method_call_1(consts.str._stdout, consts.cl.file);
+  m_obj_at(consts.cl.file, consts.str._stdout);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
   result = _FILE(R0)->fp;
 
@@ -4245,13 +4284,13 @@ m_file_stdout(void)
 } 
  
 FILE *
-m_file_stderr(void)
+file_stderr(void)
 {
   FILE *result;
 
   vm_push(0);
 
-  m_method_call_1(consts.str._stderr, consts.cl.file);
+  m_obj_at(consts.cl.file, consts.str._stderr);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stderr", R0);
   result = _FILE(R0)->fp;
 
@@ -4259,6 +4298,26 @@ m_file_stderr(void)
 
   return (result);
 } 
+
+void
+cm_file_new(unsigned argc, obj_t args)
+{
+  obj_t filename, mode;
+  FILE *fp;
+
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  args = CDR(args);  filename = CAR(args);
+  if (!is_kind_of(filename, consts.cl.string))  error(ERR_INVALID_ARG, filename);
+  args = CDR(args);  mode = CAR(args);
+  if (!is_kind_of(mode, consts.cl.string))  error(ERR_INVALID_ARG, mode);
+
+  fp = fopen(STRING(filename)->data, STRING(mode)->data);
+  if (fp == 0) {
+    error(ERR_FILE_OPEN_FAIL, filename, mode, errno);
+  }
+  
+  m_file_new(filename, mode, fp);
+}
 
 /***************************************************************************/
 
@@ -4487,6 +4546,7 @@ const struct {
   void     (*inst_init)(obj_t cl, obj_t inst, va_list ap);
   void     (*inst_walk)(obj_t cl, obj_t inst, void (*func)(obj_t));
   void     (*inst_free)(obj_t cl, obj_t inst);
+  void     (*cl_init)(void);
 } init_cl_tbl[] = {
   { &consts.cl.metaclass,
     &consts.str.metaclass,
@@ -4494,7 +4554,8 @@ const struct {
     sizeof(struct inst_metaclass),
     inst_init_object,
     inst_walk_object,
-    inst_free_object
+    inst_free_object,
+    metaclass_init
   },
   { &consts.cl.object,
     &consts.str.object,
@@ -4614,7 +4675,8 @@ const struct {
     sizeof(struct inst_file),
     inst_init_file,
     inst_walk_file,
-    inst_free_file
+    inst_free_file,
+    cl_init_file
   },
   { &consts.cl.env,
     &consts.str.environment,
@@ -4976,22 +5038,11 @@ init(void)
 		);
   }
 
-  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_methods));
-  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_methods, R0);
-  m_integer_new(FIELD_OFS(struct inst_metaclass, cl_vars));
-  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_variables, R0);
-  m_integer_new(FIELD_OFS(struct inst_metaclass, inst_methods));
-  dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.instance_methods, R0);
-
-  m_string_new(1, 2, "r+");
-  m_file_new(consts.str._stdin, R0, stdin);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
-  m_string_new(1, 2, "w+");
-  m_file_new(consts.str._stdout, R0, stdout);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdout, R0);
-  m_string_new(1, 2, "w+");
-  m_file_new(consts.str._stderr, R0, stderr);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
+  for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
+    void (*f)(void);
+    
+    if (f = init_cl_tbl[i].cl_init)  (*f)();
+  }
 
   /* Step 6. Create main module */
 
