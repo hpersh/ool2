@@ -1315,6 +1315,15 @@ obj_attr_find(obj_t inst, obj_t s)
 {
   obj_t cl, p;
 
+  cl = inst_of(inst);
+  if (cl == NIL || cl == consts.cl.metaclass) {
+    for (cl = inst; cl; cl = CLASS(cl)->parent) {
+      if (p = dict_at(CLASS(cl)->cl_vars, s)) {
+	return (&CDR(p));
+      }
+    }
+  }
+
   for (cl = inst_of(inst); cl; cl = CLASS(cl)->parent) {
     if (p = dict_at(CLASS(cl)->inst_vars, s)) {
       return ((obj_t *)((char *) inst + INTEGER(CDR(p))->val));
@@ -4952,6 +4961,16 @@ init(void)
   dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.class_variables, R0);
   m_integer_new(FIELD_OFS(struct inst_metaclass, inst_methods));
   dict_at_put(CLASS(consts.cl.metaclass)->inst_vars, consts.str.instance_methods, R0);
+
+  m_string_new(1, 2, "r+");
+  m_file_new(consts.str._stdin, R0, stdin);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stdout, R0, stdout);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdout, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stderr, R0, stderr);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
 
   /* Step 6. Create main module */
 
