@@ -8,6 +8,7 @@
 #include <assert.h>
 
 #include "ool.h"
+#include "scanner.h"
 
 #undef  PTR_64_BITS
 
@@ -213,6 +214,10 @@ stats_print(void)
 }
 
 #endif
+
+/***************************************************************************/
+
+extern int yyparse();
 
 /***************************************************************************/
 
@@ -740,6 +745,7 @@ vm_dropn(unsigned n)
 
 enum {
   FRAME_TYPE_RESTART,
+  FRAME_TYPE_INPUT,
   FRAME_TYPE_MODULE,
   FRAME_TYPE_BLOCK,
   FRAME_TYPE_METHOD_CALL
@@ -773,6 +779,30 @@ struct frame *frp;
 
 #define FRAME_RESTART_END			\
   FRAME_POP;					\
+  }
+
+struct frame_input {
+  struct frame    base;
+  struct inp_desc inp_desc;
+};
+
+#define FRAME_INPUT_BEGIN(_fp, _fn, _s)		\
+  {						\
+  struct frame_input __frame[1];		\
+  __frame->base.prev = frp;			\
+  __frame->base.type = FRAME_TYPE_INPUT;	\
+  __frame->base.sp   = sp;			\
+  __frame->inp_desc.fp = (_fp);			\
+  __frame->inp_desc.filename = (_fn);		\
+  __frame->inp_desc.str = (_s);			\
+  yy_input_push(&__frame->inp_desc);		\
+  frp = &__frame->base;				
+
+#define FRAME_INPUT_POP \
+  do { yy_input_pop(&((struct frame_input *) frp)->inp_desc);  FRAME_POP; } while (0)
+
+#define FRAME_INPUT_END					\
+  FRAME_INPUT_POP;					\
   }
 
 struct frame_module {
@@ -846,7 +876,14 @@ frame_jmp(unsigned type, int frame_jmp_code)
 
   while (frp) {
     if (frp->type == type)  longjmp(((struct frame_jmp *) frp)->jmp_buf, frame_jmp_code);
-    FRAME_POP;
+
+    switch (frp->type) {
+    case FRAME_TYPE_INPUT:
+      FRAME_INPUT_POP;
+      break;
+    default:
+      FRAME_POP;
+    }
   }
 
   HARD_ASSERT(0);
@@ -3921,23 +3958,17 @@ dict_at(obj_t dict, obj_t key)
 }
 
 void
-dict_const_chk(obj_t key)
-{
-  if (inst_of(key) == consts.cl.string
-      && string_len(key) > 0
-      && STRING(key)->data[0] == '#'
-      ) {
-    error(ERR_CONST);
-  }
-}
-
-void
 dict_at_put(obj_t dict, obj_t key, obj_t val)
 {
   obj_t p, *pp;
   
   if (p = dict_find(dict, key, &pp)) {
-    dict_const_chk(key);
+    if (is_kind_of(key, consts.cl.string)
+	&& string_len(key) > 0
+	&& STRING(key)->data[0] == '#'
+	) {
+      error(ERR_CONST);
+    }
     
     OBJ_ASSIGN(CDR(CAR(p)), val);
   } else {
@@ -4351,6 +4382,23 @@ cm_file_mode(unsigned argc, obj_t args)
 }
 
 void
+cm_file_tostring(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  m_string_new(5, 6, "#File(",
+		  string_len(_FILE(recvr)->name), STRING(_FILE(recvr)->name)->data,
+		  2, ", ",
+		  string_len(_FILE(recvr)->mode), STRING(_FILE(recvr)->mode)->data,
+		  1, ")"
+		);
+}
+
+void
 cm_file_read(unsigned argc, obj_t args)
 {
   obj_t         recvr, arg;
@@ -4447,6 +4495,34 @@ cm_file_eof(unsigned argc, obj_t args)
   if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
 
   m_boolean_new(feof(_FILE(recvr)->fp));
+}
+
+void
+cm_file_load(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  FRAME_RESTART_BEGIN {
+
+    if (frame_jmp_code == 0) {
+      FRAME_INPUT_BEGIN(_FILE(recvr)->fp, STRING(_FILE(recvr)->name)->data, 0) {
+	
+	for (;;) {
+	  if (yyparse() != 0)  break;
+	  
+	  vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
+	  
+	  m_method_call_1(consts.str.eval, R0);
+	}
+	
+      } FRAME_INPUT_END;
+    }
+
+  } FRAME_RESTART_END;
 }
 
 /***************************************************************************/
@@ -4628,19 +4704,32 @@ bt_print(void)
   struct frame *p;
 
   for (p = frp; p; p = p->prev) {
-    struct frame_method_call *q;
+    switch (p->type) {
+    case FRAME_TYPE_METHOD_CALL:
+      {
+	struct frame_method_call *q = (struct frame_method_call *) p;
+	
+	if (q->cl) {
+	  m_method_call_1(consts.str.print, q->cl);
+	  putchar('.');
+	}
+	m_method_call_1(consts.str.print, q->sel);
+	m_method_call_1(consts.str.print, q->args);
+	putchar('\n');
+      }
+      break;
+    case FRAME_TYPE_INPUT:
+      {
+	struct frame_input *q = (struct frame_input *) p;
 
-    if (p->type != FRAME_TYPE_METHOD_CALL)  continue;
-
-    q = (struct frame_method_call *) p;
-
-    if (q->cl) {
-      m_method_call_1(consts.str.print, q->cl);
-      putchar('.');
+	if (q->inp_desc.fp) {
+	  printf("In file %s, line %u:\n", q->inp_desc.filename, q->inp_desc.line);
+	}
+      }
+      break;
+    default:
+      ;
     }
-    m_method_call_1(consts.str.print, q->sel);
-    m_method_call_1(consts.str.print, q->args);
-    putchar('\n');
   }
 }
 
@@ -5085,12 +5174,14 @@ const struct {
   { &consts.cl.dict, &consts.str.keys,     cm_dict_keys },
   { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring },
 
-  { &consts.cl.file, &consts.str.name,   cm_file_name },
-  { &consts.cl.file, &consts.str.mode,   cm_file_mode },
-  { &consts.cl.file, &consts.str.readc,  cm_file_read },
-  { &consts.cl.file, &consts.str.readln, cm_file_readln },
-  { &consts.cl.file, &consts.str.writec, cm_file_write },
-  { &consts.cl.file, &consts.str.eof,    cm_file_eof }
+  { &consts.cl.file, &consts.str.name,     cm_file_name },
+  { &consts.cl.file, &consts.str.mode,     cm_file_mode },
+  { &consts.cl.file, &consts.str.tostring, cm_file_tostring },
+  { &consts.cl.file, &consts.str.readc,    cm_file_read },
+  { &consts.cl.file, &consts.str.readln,   cm_file_readln },
+  { &consts.cl.file, &consts.str.writec,   cm_file_write },
+  { &consts.cl.file, &consts.str.eof,      cm_file_eof },
+  { &consts.cl.file, &consts.str.load,     cm_file_load }
 };
 
 
@@ -5218,10 +5309,11 @@ init(void)
     OBJ_ASSIGN(CLASS(*init_cl_tbl[i].cl)->module, module_main);
   }
 
+  yy_input_init();
+
   initf = 0;
 }
 
-extern int yyparse();
 
 void
 interactive(void)
@@ -5235,7 +5327,7 @@ interactive(void)
       
       if (yyparse() != 0)  break;
  
-      vm_dropn(stack_end - sp); /* Discard all objs pushed during parsing */
+      vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
 
       m_method_call_1(consts.str.eval, R0);
       m_method_call_1(consts.str.print, R0);

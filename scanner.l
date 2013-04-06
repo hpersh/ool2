@@ -5,84 +5,48 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "scanner.h"
+#include "ool.h"
+
 #include "grammar.tab.h"
 
-#if 0
-
-struct yy_stack_entry {
-    struct yy_stack_entry *prev;
-    FILE                  *fp;
-    void                  *cookie;
-    unsigned              line;
-    YY_BUFFER_STATE       yybs;		/* Previous; current in YY_CURRENT_BUFFER */
-} *yysp;
-
-void *cmalloc(unsigned), _cfree(void *, unsigned);
+struct inp_desc *inp_desc_cur;
+YY_BUFFER_STATE yybs_cur;
 
 void
-yy_push(void)
+yy_input_init(void)
 {
-    struct yy_stack_entry *p;
-
-    p = cmalloc(sizeof(*p));
-    p->prev = yysp;
-    yysp = p;
-
-    yysp->yybs = YY_CURRENT_BUFFER;
+  yybs_cur = yy_create_buffer(stdin, YY_BUF_SIZE);
+  yy_switch_to_buffer(yybs_cur);
 }
 
 void
-yy_pop(void)
+yy_input_push(struct inp_desc *p)
 {
-    struct yy_stack_entry *p;
+  p->line = 1;
 
-   if (yysp->yybs)  yy_switch_to_buffer(yysp->yybs);
+  p->yybs_prev = yybs_cur;
+  if (p->fp) {
+    yybs_cur = yy_create_buffer(p->fp, YY_BUF_SIZE);
+    yy_switch_to_buffer(yybs_cur);
+  } else {
+    yybs_cur = yy_scan_string(p->str);
+  }
 
-    p = yysp;
-    yysp = yysp->prev;
-
-    _cfree(p, sizeof(*p));
+  p->prev = inp_desc_cur;
+  inp_desc_cur = p;
 }
 
 void
-yy_popall(void)
+yy_input_pop(struct inp_desc *p)
 {
-    while (yysp)  yy_pop();
-}
+  yy_delete_buffer(yybs_cur);
 
-void
-yy_push_file(FILE *fp, void *cookie)
-{
-    yy_push();
-    yy_switch_to_buffer(yy_create_buffer(fp, YY_BUF_SIZE));
-    yysp->fp     = fp;
-    yysp->cookie = cookie;
-    yysp->line   = 1;
-}
+  yybs_cur = p->yybs_prev;
+  yy_switch_to_buffer(yybs_cur);
 
-void
-yy_push_str(char *s, unsigned n)
-{
-    yy_push();
-    yy_scan_bytes(s, n);
-    yysp->fp     = 0;
-    yysp->cookie = 0;
-    yysp->line   = 0;
+  inp_desc_cur = p->prev;
 }
-
-void *
-yycookie(void)
-{
-    return (yysp ? yysp->cookie : 0);
-}
-
-int
-yyline(void)
-{
-    return (yysp ? yysp->line : -1);
-}
-
-#endif
 
 %}
 
@@ -139,7 +103,7 @@ DSYM		({SYM}|{CSYM})("."({SYM}|{CSYM}))+
 #endif
 }
 
-"\n"	{ /* if (yysp)  ++yysp->line */ ; }
+"\n"	{ if (inp_desc_cur)  ++inp_desc_cur->line; }
 
 "-"?{DECDIGIT}+"."{DECDIGIT}+	{ return (TOK_FLOATNUM); }
 

@@ -1,5 +1,8 @@
 #include <stdio.h>
 
+void *_cmalloc(unsigned size);
+void _cfree(unsigned size, void *ptr);
+
 struct list {
   struct list *prev, *next;
 };
@@ -118,6 +121,6 @@ void m_string_dict_new(unsigned size);
 void m_dict_new(unsigned size);
 void m_module_new(obj_t name, obj_t parent);
 void m_file_new(obj_t name, obj_t mode, FILE *fp);
-FILE *m_file_stdin(void);
-FILE *m_file_stdout(void);
-FILE *m_file_stderr(void);
+FILE *file_stdin(void);
+FILE *file_stdout(void);
+FILE *file_stderr(void);

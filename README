@@ -20,9 +20,17 @@ Infrastructure
 
 TODO
 
+Features
 - Files
 - Batch mode
 - Modules
+
+Enhancements
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
   white space terminates it, and subunits (which can be arbitrary characters, i.e. arbitrary expressions)
   are separated by periods?  Or xxx@yyy@zzz?
+- Scoped instance vars and methods; private, protected, public
+- Read only object attributes vs. acessor methods?
+
+Optimizations
+- Make m_xxx functions return a value, too
