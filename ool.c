@@ -4390,7 +4390,8 @@ cm_file_tostring(unsigned argc, obj_t args)
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
 
-  m_string_new(5, 6, "#File(",
+  m_string_new(6, string_len(CLASS(consts.cl.file)->name), STRING(CLASS(consts.cl.file)->name)->data,
+	          1, "(",
 		  string_len(_FILE(recvr)->name), STRING(_FILE(recvr)->name)->data,
 		  2, ", ",
 		  string_len(_FILE(recvr)->mode), STRING(_FILE(recvr)->mode)->data,
