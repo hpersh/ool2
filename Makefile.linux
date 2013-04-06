@@ -5,7 +5,7 @@ CC      = gcc $(CFLAGS)
 #all: ool socket.so math.so
 all: ool
 
-ool: scanner.l grammar.y ool.c ool.h
+ool: scanner.l scanner.h grammar.y ool.c ool.h
 	bison -d grammar.y
 	flex -o scanner.c scanner.l
 	$(CC) -c scanner.c

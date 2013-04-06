@@ -64,7 +64,7 @@ struct {
     obj_t addc, andc, appendc, asc, atc, atc_lengthc, atc_putc;
     obj_t _break;
     obj_t car, cdr, chr, class_methods, class_variables, _continue;
-    obj_t deletec, divc;
+    obj_t delc, divc;
     obj_t eof, equalsc, eval, evalc, exit, exitc;
     obj_t _false, filterc, foreachc;
     obj_t gec, gtc;

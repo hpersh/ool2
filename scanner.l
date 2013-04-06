@@ -98,9 +98,7 @@ DSYM		({SYM}|{CSYM})("."({SYM}|{CSYM}))+
         c = input();
     } while (!(c == '\n' || c == EOF));
 
-#if 0
-    if (yysp)  ++yysp->line;
-#endif
+    if (inp_desc_cur)  ++inp_desc_cur->line;
 }
 
 "\n"	{ if (inp_desc_cur)  ++inp_desc_cur->line; }

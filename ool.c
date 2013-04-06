@@ -4115,7 +4115,7 @@ cm_dict_del(unsigned argc, obj_t args)
 {
   obj_t recvr, arg;
 
-  if (argc != 1)  error(ERR_NUM_ARGS);
+  if (argc != 2)  error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.dict))  error(ERR_INVALID_ARG, recvr);
   arg = CAR(CDR(args));
@@ -4938,7 +4938,7 @@ const struct {
     { &consts.str.class_methods, "class-methods" },
     { &consts.str.class_variables, "class-variables" },
     { &consts.str._continue,   "continue" },
-    { &consts.str.deletec,     "delete:" },
+    { &consts.str.delc,        "del:" },
     { &consts.str.divc,        "div:" },
     { &consts.str.equalsc,     "equals:" },
     { &consts.str.eof,         "eof" },
@@ -5055,7 +5055,7 @@ const struct {
   { &consts.cl.env, &consts.str.newc_putc, cm_env_new_put },
   { &consts.cl.env, &consts.str.atc,       cm_env_at },
   { &consts.cl.env, &consts.str.atc_putc,  cm_env_at_put },
-  { &consts.cl.env, &consts.str.deletec,   cm_env_del },
+  { &consts.cl.env, &consts.str.delc,      cm_env_del },
 
   { &consts.cl.system, &consts.str.exit,  cm_system_exit }
 }, init_inst_method_tbl[] = {
@@ -5165,7 +5165,7 @@ const struct {
   
   { &consts.cl.dict, &consts.str.atc,      cm_dict_at },
   { &consts.cl.dict, &consts.str.atc_putc, cm_dict_at_put },
-  { &consts.cl.dict, &consts.str.deletec,  cm_dict_del },
+  { &consts.cl.dict, &consts.str.delc,     cm_dict_del },
   { &consts.cl.dict, &consts.str.keys,     cm_dict_keys },
   { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring },
 
@@ -5360,6 +5360,8 @@ batch(char *filename)
     }
 
   } FRAME_RESTART_END;
+
+  fclose(fp);
 }
 
 
