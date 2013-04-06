@@ -2172,6 +2172,60 @@ cm_integer_ge(unsigned argc, obj_t args)
   m_boolean_new(INTEGER(recvr)->val >= INTEGER(arg)->val);
 }
 
+void
+cm_integer_and(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_integer_new(INTEGER(recvr)->val & INTEGER(arg)->val);
+}
+
+void
+cm_integer_or(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_integer_new(INTEGER(recvr)->val | INTEGER(arg)->val);
+}
+
+void
+cm_integer_xor(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+  if (!is_kind_of(arg, consts.cl.integer))    error(ERR_INVALID_ARG, arg);
+
+  m_integer_new(INTEGER(recvr)->val ^ INTEGER(arg)->val);
+}
+
+void
+cm_integer_not(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
+
+  m_integer_new(~INTEGER(recvr)->val);
+}
+
 /***************************************************************************/
 
 /* Class: Float */
@@ -5128,6 +5182,10 @@ const struct {
   { &consts.cl.integer, &consts.str.equalsc,      cm_integer_equals },
   { &consts.cl.integer, &consts.str.hash,         cm_integer_hash },
   { &consts.cl.integer, &consts.str.minus,        cm_integer_minus },
+  { &consts.cl.integer, &consts.str.andc,         cm_integer_and },
+  { &consts.cl.integer, &consts.str.orc,          cm_integer_or },
+  { &consts.cl.integer, &consts.str.xorc,         cm_integer_xor },
+  { &consts.cl.integer, &consts.str.not,          cm_integer_not },
   { &consts.cl.integer, &consts.str.tostring,     cm_integer_tostring },
   { &consts.cl.integer, &consts.str.tostringc,    cm_integer_tostring_base },
 
