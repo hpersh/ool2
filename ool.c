@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <setjmp.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <assert.h>
 
@@ -120,20 +121,20 @@ void     dict_del(obj_t dict, obj_t key);
 unsigned dict_count(obj_t dict);
 void  m_dict_keys(obj_t dict);
 
-struct inst_module {
-  struct inst_dict base[1];
-  obj_t            name, parent;
-  void             *ptr;	/* Cookie from dl_open() */
-};
-#define MODULE(x)  ((struct inst_module *)(x))
-void m_fqmodname(obj_t mod);
-
 struct inst_file {
   struct obj base[1];
   obj_t      name, mode;
   FILE       *fp;
 };
 #define _FILE(x)  ((struct inst_file *)(x))
+
+struct inst_module {
+  struct inst_dict base[1];
+  obj_t            name, parent;
+  void             *cookie;	/* Cookie from dl_open() */
+};
+#define MODULE(x)  ((struct inst_module *)(x))
+void m_fqmodname(obj_t mod);
 
 obj_t env_at(obj_t s);
 void  env_new_put(obj_t s, obj_t val);
@@ -365,6 +366,7 @@ enum {
   ERR_IDX_RANGE_2,
   ERR_CONST,
   ERR_FILE_OPEN_FAIL,
+  ERR_MODULE_OPEN_FAIL,
   ERR_ASSERT_FAIL
 };
 
@@ -384,6 +386,7 @@ const char * const error_msgs[] = {
   "Index out of range",
   "Write constant",
   "File open failed",
+  "Module open failed",
   "Assertion failed"
 };
 
@@ -847,7 +850,7 @@ struct frame_input {
 
 struct frame_module {
   struct frame base;
-  obj_t        module;
+  obj_t        module_prev, module;
 };
 
 #define FRAME_MODULE_BEGIN(m)			\
@@ -856,11 +859,15 @@ struct frame_module {
   __frame->base.prev = frp;			\
   __frame->base.type = FRAME_TYPE_MODULE;	\
   __frame->base.sp   = sp;			\
-  __frame->module    = (m);			\
+  __frame->module_prev = module_cur;		\
+  __frame->module = module_cur = (m);		\
   frp = &__frame->base;
 
+#define FRAME_MODULE_POP \
+  do { module_cur = ((struct frame_module *) frp)->module_prev;  FRAME_POP; } while (0)
+
 #define FRAME_MODULE_END			\
-  FRAME_POP;					\
+  FRAME_MODULE_POP;				\
   }
 
 struct frame_block {
@@ -921,6 +928,9 @@ frame_jmp(unsigned type, int frame_jmp_code)
     case FRAME_TYPE_INPUT:
       FRAME_INPUT_POP;
       break;
+    case FRAME_TYPE_MODULE:
+      FRAME_MODULE_POP;
+      break;
     default:
       FRAME_POP;
     }
@@ -951,7 +961,16 @@ method_run(struct frame_method_call *mcfrp, obj_t cl, obj_t sel, obj_t func, uns
     return;
   }
   if (cl == consts.cl.block) {
-    m_method_call_2(consts.str.evalc, func, args);
+    if (mcfrp && mcfrp->cl) {
+      FRAME_MODULE_BEGIN(CLASS(mcfrp->cl)->module) {
+
+	m_method_call_2(consts.str.evalc, func, args);
+	
+      } FRAME_MODULE_END;
+    } else {
+      m_method_call_2(consts.str.evalc, func, args);
+    }
+
     return;
   }
 
@@ -4244,155 +4263,7 @@ cm_dict_count(unsigned argc, obj_t args)
 
 /***************************************************************************/
 
-/* Class: Module */
-
-void
-inst_init_module(obj_t cl, obj_t inst, va_list ap)
-{
-  OBJ_ASSIGN(MODULE(inst)->name,   va_arg(ap, obj_t));
-  OBJ_ASSIGN(MODULE(inst)->parent, va_arg(ap, obj_t));
-
-  inst_init_parent(cl, inst, ap);
-}
-
-void
-inst_walk_module(obj_t cl, obj_t inst, void (*func)(obj_t))
-{
-  (*func)(MODULE(inst)->name);
-  (*func)(MODULE(inst)->parent);
-
-  inst_walk_parent(cl, inst, func);
-}
-
-void
-inst_free_module(obj_t cl, obj_t inst)
-{
-  inst_free_parent(cl, inst);
-}
-
-void
-m_module_new(obj_t name, obj_t parent)
-{
-  vm_push(0);
-
-  vm_inst_alloc(consts.cl.module);
-  inst_init(R0, name, parent, string_hash, string_equal, 32);
-  
-  if (parent) {
-    dict_at_put(OBJ(MODULE(parent)->base), name, R0);
-  }
-
-  vm_drop();
-}
-
-void
-cm_module_new(unsigned argc, obj_t args)
-{
-  obj_t name, parent;
-
-  if (argc != 3)  error(ERR_NUM_ARGS);
-  args = CDR(args);
-  name = CAR(args);
-  parent = CAR(CDR(args));
-  if (!is_kind_of(parent, consts.cl.module))  error(ERR_INVALID_ARG, parent);
-
-  m_module_new(name, parent);
-}
-
-void
-m_fqmodname(obj_t mod)
-{
-    obj_t p, s;
-
-    vm_push(0);
-
-    m_string_new(0);
-    for ( ; p = MODULE(mod)->parent; mod = p) {
-	s = MODULE(mod)->name;
-
-	if (string_len(R0) == 0) {
-	    vm_assign(0, s);
-	    continue;
-	}
-
-	m_string_new(3, string_len(s), STRING(s)->data,
-		        1, ".",
-		        string_len(R0), STRING(R0)->data
-		     );
-    }
-
-    vm_drop();
-}
-
-void
-cm_module_name(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
-  
-  m_fqmodname(recvr);
-}
-
-void
-cm_module_parent(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 1)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
-  
-  vm_assign(0, MODULE(recvr)->parent);
-}
-
-void
-cm_module_at(unsigned argc, obj_t args)
-{
-  obj_t recvr, arg, p;
-
-  if (argc != 2)  error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
-  arg = CAR(CDR(args));
-
-  if (p = dict_at(OBJ(MODULE(recvr)->base), arg)) {
-    vm_assign(0, CDR(p));
-    return;
-  }
-
-  error(ERR_NOT_BOUND, arg);
-}
-
-void
-cm_module_tostring(unsigned argc, obj_t args)
-{
-  cm_module_name(argc, args);
-}
-
-/***************************************************************************/
-
 /* Class: File */
-
-void
-cl_init_file(void)
-{
-  vm_push(0);
-
-  m_string_new(1, 2, "r+");
-  m_file_new(consts.str._stdin, R0, stdin);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
-  m_string_new(1, 2, "w+");
-  m_file_new(consts.str._stdout, R0, stdout);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdout, R0);
-  m_string_new(1, 2, "w+");
-  m_file_new(consts.str._stderr, R0, stderr);
-  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
-
-  vm_pop(0);
-}
 
 void
 inst_init_file(obj_t cl, obj_t inst, va_list ap)
@@ -4481,10 +4352,22 @@ file_stderr(void)
 } 
 
 void
+m_file_open(obj_t filename, obj_t mode)
+{
+  FILE *fp;
+
+  fp = fopen(STRING(filename)->data, STRING(mode)->data);
+  if (fp == 0) {
+    error(ERR_FILE_OPEN_FAIL, filename, mode, errno);
+  }
+  
+  m_file_new(filename, mode, fp);
+}
+
+void
 cm_file_new(unsigned argc, obj_t args)
 {
   obj_t filename, mode;
-  FILE *fp;
 
   if (argc != 3)  error(ERR_NUM_ARGS);
   args = CDR(args);  filename = CAR(args);
@@ -4496,12 +4379,7 @@ cm_file_new(unsigned argc, obj_t args)
       || string_len(mode) == 0
       )  error(ERR_INVALID_ARG, mode);
 
-  fp = fopen(STRING(filename)->data, STRING(mode)->data);
-  if (fp == 0) {
-    error(ERR_FILE_OPEN_FAIL, filename, mode, errno);
-  }
-  
-  m_file_new(filename, mode, fp);
+  m_file_open(filename, mode);
 }
 
 void
@@ -4646,6 +4524,22 @@ cm_file_eof(unsigned argc, obj_t args)
 }
 
 void
+m_file_load(obj_t file)
+{
+  FRAME_INPUT_BEGIN(_FILE(file)->fp, STRING(_FILE(file)->name)->data, 0) {
+    
+    for (;;) {
+      if (yyparse() != 0)  break;
+      
+      vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
+      
+      m_method_call_1(consts.str.eval, R0);
+    }
+    
+  } FRAME_INPUT_END;
+}
+
+void
 cm_file_load(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -4665,6 +4559,231 @@ cm_file_load(unsigned argc, obj_t args)
     }
     
   } FRAME_INPUT_END;
+}
+
+void
+cl_init_file(void)
+{
+  vm_push(0);
+
+  m_string_new(1, 2, "r+");
+  m_file_new(consts.str._stdin, R0, stdin);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdin, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stdout, R0, stdout);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stdout, R0);
+  m_string_new(1, 2, "w+");
+  m_file_new(consts.str._stderr, R0, stderr);
+  dict_at_put(CLASS(consts.cl.file)->cl_vars, consts.str._stderr, R0);
+
+  vm_pop(0);
+}
+
+/***************************************************************************/
+
+/* Class: Module */
+
+void
+inst_init_module(obj_t cl, obj_t inst, va_list ap)
+{
+  OBJ_ASSIGN(MODULE(inst)->name,   va_arg(ap, obj_t));
+  OBJ_ASSIGN(MODULE(inst)->parent, va_arg(ap, obj_t));
+
+  inst_init_parent(cl, inst, ap);
+}
+
+void
+inst_walk_module(obj_t cl, obj_t inst, void (*func)(obj_t))
+{
+  (*func)(MODULE(inst)->name);
+  (*func)(MODULE(inst)->parent);
+
+  inst_walk_parent(cl, inst, func);
+}
+
+void
+inst_free_module(obj_t cl, obj_t inst)
+{
+  void *cookie;
+
+  if (cookie = MODULE(inst)->cookie)  dlclose(cookie);
+  
+  inst_free_parent(cl, inst);
+}
+
+void
+m_module_new(obj_t name, obj_t parent)
+{
+  vm_push(0);
+
+  vm_inst_alloc(consts.cl.module);
+  inst_init(R0, name, parent, string_hash, string_equal, 32);
+  
+  if (parent) {
+    dict_at_put(OBJ(MODULE(parent)->base), name, R0);
+  }
+
+  vm_drop();
+}
+
+void
+cm_module_new(unsigned argc, obj_t args)
+{
+  obj_t name, path;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  name = CAR(CDR(args));
+  if (!is_kind_of(name, consts.cl.string))  error(ERR_INVALID_ARG, name);
+
+  vm_pushm(1, 3);
+
+  m_string_new(1, 2, "r+");
+  vm_assign(1, R0);		/* R1 = file open mode */
+
+  path = dict_at(CLASS(consts.cl.module)->cl_vars,
+		 consts.str.path
+		 );
+  if (path) {
+    path = CDR(path);
+  } else {
+    m_string_new(1, 1, ".");
+    m_cons(R0, NIL);
+    vm_assign(2, R0);		/* R2 = path */
+    path = R2;
+  }
+
+  for ( ; path; path = CDR(path)) {
+    obj_t dir = CAR(path);
+    FILE  *fp;
+    void  *cookie;
+
+    m_string_new(3, string_len(dir), STRING(dir)->data,
+		    1, "/",
+		    string_len(name), STRING(name)->data
+		 );
+    vm_assign(3, R0);		/* R3 = file base name */
+    
+    m_string_new(2, string_len(R3), STRING(R3)->data,
+		    3, ".so"
+		 );
+    cookie = dlopen(STRING(R0)->data, RTLD_NOW);
+    if (cookie) {
+      m_module_new(name, module_cur);
+      MODULE(R0)->cookie = cookie;
+
+      goto done;
+    }
+
+    m_string_new(2, string_len(R3), STRING(R3)->data,
+		    4, ".ool"
+		 );
+    fp = fopen(STRING(R0)->data, STRING(R1)->data);
+    if (fp) {
+      m_file_new(R0, R1, fp);
+      vm_assign(1, R0);		/* R1 = file */
+      
+      m_module_new(name, module_cur);
+      vm_assign(2, R0);		/* R2 = module */
+      
+      FRAME_MODULE_BEGIN(R2) {
+	
+	m_file_load(R1);
+	
+      } FRAME_MODULE_END;
+      
+      goto done;
+    }
+  }
+
+  error(ERR_MODULE_OPEN_FAIL, name);
+
+ done:
+  vm_popm(1, 3);
+}
+
+void
+m_fqmodname(obj_t mod)
+{
+    obj_t p, s;
+
+    vm_push(0);
+
+    m_string_new(0);
+    for ( ; p = MODULE(mod)->parent; mod = p) {
+	s = MODULE(mod)->name;
+
+	if (string_len(R0) == 0) {
+	    vm_assign(0, s);
+	    continue;
+	}
+
+	m_string_new(3, string_len(s), STRING(s)->data,
+		        1, ".",
+		        string_len(R0), STRING(R0)->data
+		     );
+    }
+
+    vm_drop();
+}
+
+void
+cm_module_name(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  
+  m_fqmodname(recvr);
+}
+
+void
+cm_module_parent(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_assign(0, MODULE(recvr)->parent);
+}
+
+void
+cm_module_at(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg, p;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+
+  if (p = dict_at(OBJ(MODULE(recvr)->base), arg)) {
+    vm_assign(0, CDR(p));
+    return;
+  }
+
+  error(ERR_NOT_BOUND, arg);
+}
+
+void
+cm_module_tostring(unsigned argc, obj_t args)
+{
+  cm_module_name(argc, args);
+}
+
+void
+cl_init_module(void)
+{
+  m_string_new(1, 1, ".");
+  m_cons(R0, NIL);
+
+  dict_at_put(CLASS(consts.cl.module)->cl_vars,
+	      consts.str.path,
+	      R0
+	      );
 }
 
 /***************************************************************************/
@@ -5022,14 +5141,6 @@ const struct {
     inst_walk_dict,
     inst_free_dict
   },
-  { &consts.cl.module,
-    &consts.str.module,
-    &consts.cl.dict,
-    sizeof(struct inst_module),
-    inst_init_module,
-    inst_walk_module,
-    inst_free_module
-  },
   { &consts.cl.file,
     &consts.str.file,
     &consts.cl.object,
@@ -5038,6 +5149,15 @@ const struct {
     inst_walk_file,
     inst_free_file,
     cl_init_file
+  },
+  { &consts.cl.module,
+    &consts.str.module,
+    &consts.cl.dict,
+    sizeof(struct inst_module),
+    inst_init_module,
+    inst_walk_module,
+    inst_free_module,
+    cl_init_module
   },
   { &consts.cl.env,
     &consts.str.environment,
@@ -5120,7 +5240,6 @@ const struct {
     { &consts.str.new,         "new" },
     { &consts.str.newc,        "new:" },
     { &consts.str.newc_modec,  "new:mode:" },
-    { &consts.str.newc_parentc, "new:parent:" },
     { &consts.str.newc_parentc_instance_variablesc, "new:parent:instance-variables:" },
     { &consts.str.newc_putc,   "new:put:" },
     { &consts.str.nil,         "#nil" },
@@ -5197,7 +5316,7 @@ const struct {
 
   { &consts.cl.dict, &consts.str.new, cm_dict_new },
 
-  { &consts.cl.module, &consts.str.newc_parentc, cm_module_new },
+  { &consts.cl.module, &consts.str.newc, cm_module_new },
 
   { &consts.cl.file, &consts.str.newc_modec, cm_file_new },
 

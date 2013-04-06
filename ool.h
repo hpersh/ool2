@@ -73,7 +73,7 @@ struct {
     obj_t keys;
     obj_t lec, length, load, ltc;
     obj_t main, mapc, minus, mode, modc, multc;
-    obj_t name, new, newc, newc_modec, newc_parentc, newc_parentc_instance_variablesc, newc_putc, nil, not;
+    obj_t name, new, newc, newc_modec, newc_parentc_instance_variablesc, newc_putc, nil, not;
     obj_t orc;
     obj_t parent, path, pquote, print, printc;
     obj_t quote;
