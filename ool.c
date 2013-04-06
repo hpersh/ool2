@@ -4790,93 +4790,82 @@ cl_init_module(void)
 
 /* Class: Environment */
 
-obj_t
-env_at(obj_t s)
-{
-  struct frame *p;
-  obj_t        r;
-
-  for (p = frp; p; p = p->prev) {
-    switch (p->type) {
-    case FRAME_TYPE_BLOCK:
-      if (r = dict_at(((struct frame_block *) p)->dict, s)) {
-	return (CDR(r));
-      }
-      break;
-    case FRAME_TYPE_MODULE:
-      if (r = dict_at(OBJ(MODULE(((struct frame_module *) p)->module)->base), s)) {
-	return (CDR(r));
-      }
-      break;
-    default:
-      ;
-    }
-  }
-
-  error(ERR_NOT_BOUND, s);
-
-  return (NIL);
-}
-
-obj_t
-env_top_dict(void)
-{
-  struct frame *p;
-
-  for (p = frp; p; p = p->prev) {
-    switch (p->type) {
-    case FRAME_TYPE_BLOCK:
-      return (((struct frame_block *) p)->dict);
-    case FRAME_TYPE_MODULE:
-      return (OBJ(MODULE(((struct frame_module *) p)->module)->base));
-    default:
-      ;
-    }
-  }
-
-  return (NIL);
-}
-
 void
-env_new_put(obj_t s, obj_t val)
-{
-  dict_at_put(env_top_dict(), s, val);
-}
-
-void
-env_at_put(obj_t s, obj_t val)
+env_find(obj_t s, obj_t *pdn_found, obj_t *pdict_top)
 {
   struct frame *p;
-  obj_t        dd = NIL, d, q;
+  obj_t        m, d, dn_found = NIL, dict_top = NIL;
 
   for (p = frp; p; p = p->prev) {
     switch (p->type) {
     case FRAME_TYPE_BLOCK:
       d = ((struct frame_block *) p)->dict;
+      
+      if (dict_top == NIL)  dict_top = d;
+      if (pdn_found == 0 || (dn_found = dict_at(d, s)))  goto done;
       break;
+      
     case FRAME_TYPE_MODULE:
-      d = OBJ(MODULE(((struct frame_module *) p)->module)->base);
-      break;
+      for (m = ((struct frame_module *) p)->module; m; m = MODULE(m)->parent) {
+	d = OBJ(MODULE(m)->base);
+	
+	if (dict_top == NIL)  dict_top = d;
+	if (pdn_found == 0 || (dn_found = dict_at(d, s)))  goto done;
+      }
+      goto done;
     default:
-      continue;
-    }
-
-    if (dd == NIL)  dd = d;
-    if (q = dict_find(d, s, 0)) {
-      OBJ_ASSIGN(CDR(CAR(q)), val);
-      return;
+      ;
     }
   }
+  
+ done:  
+  if (pdn_found)  *pdn_found = dn_found;
+  if (pdict_top)  *pdict_top = dict_top;
+}
 
-  HARD_ASSERT(dd != NIL);
+obj_t
+env_at(obj_t s)
+{
+  obj_t dn_found;
 
-  dict_at_put(dd, s, val);
+  env_find(s, &dn_found, 0);
+  if (dn_found == NIL)  error(ERR_NOT_BOUND, s);
+
+  return (CDR(dn_found));
+}
+
+void
+env_new_put(obj_t s, obj_t val)
+{
+  obj_t dict_top;
+
+  env_find(s, 0, &dict_top);
+
+  dict_at_put(dict_top, s, val);
+}
+
+void
+env_at_put(obj_t s, obj_t val)
+{
+  obj_t dn_found, dict_top;
+
+  env_find(s, &dn_found, &dict_top);
+
+  if (dn_found) {
+    OBJ_ASSIGN(CDR(dn_found), val);
+  } else {
+    dict_at_put(dict_top, s, val);
+  }
 }
 
 void
 env_del(obj_t s)
 {
-  dict_del(env_top_dict(), s);
+  obj_t dict_top;
+
+  env_find(s, 0, &dict_top);
+
+  dict_del(dict_top, s);
 }
 
 void

@@ -1,0 +1,10 @@
+
+[#Metaclass new: "Point" parent: #Object instance-variables: '(x y)]
+
+[Point.instance-methods at: 'tostring put: {(self) [(self.x, self.y) tostring]}]
+
+[Point.instance-methods at: 'add: put: {(self p) ([self.x add: p.x], [self.y add: p.y])}]
+
+[Point.instance-methods at: 'minus put: {(self) [result := [Point new]] [result.x = [self.x minus]] [result.y = [self.y minus]] result}]
+
+

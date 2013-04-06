@@ -106,9 +106,11 @@
 [#File new: "test" mode: "r+"]  // Test new
 
 // Test #Module
-// [#Module new: "./socket.so"]  // Test new
-// #Socket  // Test loading
-// [s = [#Socket new]]  // Test loading
+[#Module new: "test"]
+[p = [test.Point new]]
+[p.x = 13]
+[p.y = 42]
+[p add: [p minus]]
 
 // Test mem mgmt
 // [#System collect]
