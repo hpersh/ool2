@@ -4277,8 +4277,26 @@ m_module_new(obj_t name, obj_t parent)
 
   vm_inst_alloc(consts.cl.module);
   inst_init(R0, name, parent, string_hash, string_equal, 32);
+  
+  if (parent) {
+    dict_at_put(OBJ(MODULE(parent)->base), name, R0);
+  }
 
   vm_drop();
+}
+
+void
+cm_module_new(unsigned argc, obj_t args)
+{
+  obj_t name, parent;
+
+  if (argc != 3)  error(ERR_NUM_ARGS);
+  args = CDR(args);
+  name = CAR(args);
+  parent = CAR(CDR(args));
+  if (!is_kind_of(parent, consts.cl.module))  error(ERR_INVALID_ARG, parent);
+
+  m_module_new(name, parent);
 }
 
 void
@@ -4304,6 +4322,54 @@ m_fqmodname(obj_t mod)
     }
 
     vm_drop();
+}
+
+void
+cm_module_name(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  
+  m_fqmodname(recvr);
+}
+
+void
+cm_module_parent(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  
+  vm_assign(0, MODULE(recvr)->parent);
+}
+
+void
+cm_module_at(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg, p;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.module))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+
+  if (p = dict_at(OBJ(MODULE(recvr)->base), arg)) {
+    vm_assign(0, CDR(p));
+    return;
+  }
+
+  error(ERR_NOT_BOUND, arg);
+}
+
+void
+cm_module_tostring(unsigned argc, obj_t args)
+{
+  cm_module_name(argc, args);
 }
 
 /***************************************************************************/
@@ -5054,6 +5120,7 @@ const struct {
     { &consts.str.new,         "new" },
     { &consts.str.newc,        "new:" },
     { &consts.str.newc_modec,  "new:mode:" },
+    { &consts.str.newc_parentc, "new:parent:" },
     { &consts.str.newc_parentc_instance_variablesc, "new:parent:instance-variables:" },
     { &consts.str.newc_putc,   "new:put:" },
     { &consts.str.nil,         "#nil" },
@@ -5129,6 +5196,8 @@ const struct {
   { &consts.cl.array, &consts.str.newc, cm_array_new },
 
   { &consts.cl.dict, &consts.str.new, cm_dict_new },
+
+  { &consts.cl.module, &consts.str.newc_parentc, cm_module_new },
 
   { &consts.cl.file, &consts.str.newc_modec, cm_file_new },
 
@@ -5253,6 +5322,11 @@ const struct {
   { &consts.cl.dict, &consts.str.delc,     cm_dict_del },
   { &consts.cl.dict, &consts.str.keys,     cm_dict_keys },
   { &consts.cl.dict, &consts.str.tostring, cm_dict_tostring },
+
+  { &consts.cl.module, &consts.str.name,     cm_module_name },
+  { &consts.cl.module, &consts.str.parent,   cm_module_parent },
+  { &consts.cl.module, &consts.str.atc,      cm_module_at },
+  { &consts.cl.module, &consts.str.tostring, cm_module_tostring },
 
   { &consts.cl.file, &consts.str.name,     cm_file_name },
   { &consts.cl.file, &consts.str.mode,     cm_file_mode },
@@ -5380,6 +5454,11 @@ init(void)
 		*init_cl_tbl[i].cl
 		);
   }
+
+  dict_at_put(OBJ(MODULE(module_main)->base),
+	      consts.str.main,
+	      module_main
+	      );
 
   module_cur = module_main;
 
