@@ -4507,23 +4507,17 @@ cm_file_load(unsigned argc, obj_t args)
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
 
-  FRAME_RESTART_BEGIN {
-
-    if (frame_jmp_code == 0) {
-      FRAME_INPUT_BEGIN(_FILE(recvr)->fp, STRING(_FILE(recvr)->name)->data, 0) {
-	
-	for (;;) {
-	  if (yyparse() != 0)  break;
-	  
-	  vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
-	  
-	  m_method_call_1(consts.str.eval, R0);
-	}
-	
-      } FRAME_INPUT_END;
+  FRAME_INPUT_BEGIN(_FILE(recvr)->fp, STRING(_FILE(recvr)->name)->data, 0) {
+    
+    for (;;) {
+      if (yyparse() != 0)  break;
+      
+      vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
+      
+      m_method_call_1(consts.str.eval, R0);
     }
-
-  } FRAME_RESTART_END;
+    
+  } FRAME_INPUT_END;
 }
 
 /***************************************************************************/
@@ -5338,10 +5332,33 @@ interactive(void)
 
 
 void
-batch(void)
+batch(char *filename)
 {
+  FILE *fp;
+
+  fp = fopen(filename, "r+");
+  if (fp == 0) {
+    fprintf(stderr, "Failed to open %s: ", filename);
+    perror(0);
+    zexit(1);
+  }
+
   FRAME_RESTART_BEGIN {
-    if (frame_jmp_code != 0)  return;
+
+    if (frame_jmp_code == 0) {
+      FRAME_INPUT_BEGIN(fp, filename, 0) {
+
+	for (;;) {
+	  if (yyparse() != 0)  break;
+	  
+	  vm_dropn(frp->sp - sp); /* Discard all objs pushed during parsing */
+	  
+	  m_method_call_1(consts.str.eval, R0);
+	}
+
+      } FRAME_INPUT_END;
+    }
+
   } FRAME_RESTART_END;
 }
 
@@ -5366,7 +5383,7 @@ main(int argc, char **argv)
 
   FRAME_MODULE_BEGIN(module_main) {
 
-    if (argc > 1)  batch();  else  interactive();
+    if (argc > 1)  batch(argv[1]);  else  interactive();
 
   } FRAME_MODULE_END;
 
