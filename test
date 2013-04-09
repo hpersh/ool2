@@ -107,12 +107,11 @@
 
 // Test #Module
 [#Module new: "test"]
-[p = [test.Point new]]
-[p.x = 13]
-[p.y = 42]
-[p add: [p minus]]
+[p = [test.Point new: (1, 2)]]
+[[[p add: [p minus]] equals: (0, 0)] assert]
+[[[p dot-product: [test.Point new: (-4, 2)]] equals: 0] assert]
 
 // Test mem mgmt
 // [#System collect]
 
-["TESTS PASSED\n" print]
+["\n***** TESTS PASSED *****\n\n" print]

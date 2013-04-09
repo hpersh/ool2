@@ -5021,9 +5021,9 @@ const struct {
     &consts.str.metaclass,
     &consts.cl.object,
     sizeof(struct inst_metaclass),
-    inst_init_object,
-    inst_walk_object,
-    inst_free_object,
+    inst_init_class,
+    inst_walk_class,
+    inst_free_class,
     metaclass_init
   },
   { &consts.cl.object,
@@ -5461,18 +5461,14 @@ init(void)
 
   for (i = 0; i < ARRAY_SIZE(obj_list); ++i)  list_init(&obj_list[i]);
 
-  /* Step 1. Create metaclass */
+  /* Step 1. Create classes, first pass */
 
-  OBJ_ASSIGN(consts.cl.metaclass, _obj_alloc(sizeof(struct inst_metaclass)));
-  CLASS(consts.cl.metaclass)->inst_size = sizeof(struct inst_metaclass);
-  CLASS(consts.cl.metaclass)->inst_init = inst_init_class;
-  CLASS(consts.cl.metaclass)->inst_walk = inst_walk_class;
-  CLASS(consts.cl.metaclass)->inst_free = inst_free_class;
-  
-  /* Step 2. Create classes, first pass */
-
-  for (i = 1; i < ARRAY_SIZE(init_cl_tbl); ++i) {
-    vm_inst_alloc(consts.cl.metaclass);
+  for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
+    if (i == 0) {
+      vm_assign(0, _obj_alloc(sizeof(struct inst_metaclass)));
+    } else {
+      vm_inst_alloc(consts.cl.metaclass);
+    }
     CLASS(R0)->inst_size = init_cl_tbl[i].inst_size;
     CLASS(R0)->inst_init = init_cl_tbl[i].inst_init;
     CLASS(R0)->inst_walk = init_cl_tbl[i].inst_walk;
@@ -5480,7 +5476,7 @@ init(void)
     OBJ_ASSIGN(*init_cl_tbl[i].cl, R0);
   }
 
-  /* Step 3. Fix up class hierarchy */
+  /* Step 2. Fix up class hierarchy */
 
   for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
     OBJ_ASSIGN(CLASS(*init_cl_tbl[i].cl)->parent,
@@ -5488,7 +5484,7 @@ init(void)
 	       );
   }
 
-  /* Step 4. Create constants */
+  /* Step 3. Create constants */
 
   vm_inst_alloc(consts.cl.boolean);
   inst_init(R0, 0);
@@ -5502,7 +5498,7 @@ init(void)
     OBJ_ASSIGN(*init_str_tbl[i].obj, R0);
   }
 
-  /* Step 5. Create classes, second pass */
+  /* Step 4. Create classes, second pass */
 
   for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
     OBJ_ASSIGN(CLASS(*init_cl_tbl[i].cl)->name, *init_cl_tbl[i].name);
@@ -5538,7 +5534,7 @@ init(void)
     if (f = init_cl_tbl[i].cl_init)  (*f)();
   }
 
-  /* Step 6. Create main module */
+  /* Step 5. Create main module */
 
   m_module_new(consts.str.main, NIL);
   OBJ_ASSIGN(module_main, R0);
@@ -5570,7 +5566,7 @@ init(void)
 
   module_cur = module_main;
 
-  /* Step 7. Fix up class module membership */
+  /* Step 6. Fix up class module membership */
 
   for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
     OBJ_ASSIGN(CLASS(*init_cl_tbl[i].cl)->module, module_main);

@@ -20,8 +20,10 @@ Infrastructure
 
 TODO
 
+Bugs
+- Ref cnt faliure in collect after reloading module
+
 Features
-- Modules
 
 Enhancements
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
