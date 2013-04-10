@@ -1,0 +1,41 @@
+[#Metaclass new: 'Point parent: #Object instance-variables: '(x y)]
+
+[Point.class-methods at: 'new: put:
+  {(cl val)
+    [result := [Point new]]
+    [result.x = [val car]]
+    [result.y = [val cdr]]
+    result
+  }
+]
+
+[Point.instance-methods at: 'tostring put:
+  {(self)
+    [(self.x, self.y) tostring]
+  }
+]
+
+[Point.instance-methods at: 'equals: put:
+  {(self p)
+    [[self.x equals: p.x] and: [self.y equals: p.y]]
+  }
+]
+
+[Point.instance-methods at: 'add: put:
+  {(self p)
+    [Point new: ([self.x add: p.x], [self.y add: p.y])]
+  }
+]
+
+[Point.instance-methods at: 'minus put:
+  {(self)
+    [Point new: ([self.x minus], [self.y minus])]
+  }
+]
+
+[Point.instance-methods at: 'dot-product: put:
+  {(self p)
+    [[self.x mult: p.x] add: [self.y mult: p.y]]
+  }
+]
+
