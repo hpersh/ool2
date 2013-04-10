@@ -21,7 +21,6 @@ Infrastructure
 TODO
 
 Bugs
-- Ref cnt faliure in collect after reloading module
 
 Features
 
