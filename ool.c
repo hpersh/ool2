@@ -646,7 +646,6 @@ collect(void)
 
 #ifndef NDEBUG
     ASSERT(r->ref_cnt != 0);
-    r->old_ref_cnt = r->ref_cnt;
 #endif
 
     r->ref_cnt = 0;
@@ -666,14 +665,6 @@ collect(void)
   }
   
   obj_list_swap();
-
-#ifndef NDEBUG
-  for (e = LIST_END(OBJ_LIST_ACTIVE), p = LIST_FIRST(OBJ_LIST_ACTIVE); p != e; p = LIST_NEXT(p)) {
-    r = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node);
-
-    ASSERT(r->ref_cnt == r->old_ref_cnt);
-  }
-#endif
 }
 
 /***************************************************************************/

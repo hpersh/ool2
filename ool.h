@@ -15,9 +15,6 @@ typedef struct obj *obj_t;
 struct obj {
   struct list list_node[1];
   unsigned    ref_cnt;
-#ifndef NDEBUG
-  unsigned    old_ref_cnt;
-#endif
   obj_t       inst_of;
 };
 
