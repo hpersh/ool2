@@ -18,11 +18,38 @@ Lightweight virtual machine
 
 Infrastructure
 
+GRAMMAR
+
+An expression is one of: an atom, a pair, a list, a method call, or a block.
+
+An atom is one of: a number, a symbol or a string.
+Examples: 13, 0x13, -45.67, sam, "This is a string"
+
+A pair is a left paren ('('), an expression, a comma (','), an expression, and a right paren (')').
+Example: (1, 2)
+
+A list is a left paren ('('), followed by 0 or more expressions, separated by spaces, and a right paren (')').
+Example: (this is a list)
+
+A method call is a left square bracket ('['), followed by interleaved expressions and selectors, separated by spaces, followed by a right square bracket (']').
+Example: [1 add: 2]
+
+A block is a left brace ('{'), followed by a list, followed by a sequence of expressions, separated by spaces, followed by a right brace ('}').
+Example: {(a b) [a add: b]}
+
+Short forms
+
+'x       is short for [x quote]
+x.y      is short for [x at: 'y]
+[x = y]  is short for [#Environment at: 'x put: y]
+[x := y] is short for [#Environment new: 'x put: y]
+
 TODO
 
 Bugs
 
 Features
+- while, return
 
 Enhancements
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
