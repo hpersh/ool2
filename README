@@ -39,10 +39,13 @@ Example: {(a b) [a add: b]}
 
 Short forms
 
-'x       is short for [x quote]
-x.y      is short for [x at: 'y]
-[x = y]  is short for [#Environment at: 'x put: y]
-[x := y] is short for [#Environment new: 'x put: y]
+'x        is short for [x quote]
+[x = y]   is short for [#Environment at: 'x put: y]
+[x := y]  is short for [#Environment new: 'x put: y]
+x.y       is short for [x at: 'y]
+[x.y = z] is short for [x at: 'y put: z]
+
+For more examples, see the module "point.ool".
 
 TODO
 
