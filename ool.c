@@ -367,27 +367,9 @@ enum {
   ERR_CONST,
   ERR_FILE_OPEN_FAIL,
   ERR_MODULE_OPEN_FAIL,
+  ERR_WHILE,
+  ERR_BLOCK,
   ERR_ASSERT_FAIL
-};
-
-const char * const error_msgs[] = {
-  "Stack overflow",
-  "Incorrect number of arguments",
-  "Invalid argument",
-  "Invalid value",
-  "Invalid value",
-  "Invalid method",
-  "No such method",
-  "No such attribute",
-  "Bad form",
-  "Symbol not bound",
-  "Arithmetic overflow",
-  "Index out of range",
-  "Index out of range",
-  "Write constant",
-  "File open failed",
-  "Module open failed",
-  "Assertion failed"
 };
 
 void error(unsigned errcode, ...);
@@ -781,6 +763,7 @@ enum {
   FRAME_TYPE_RESTART,
   FRAME_TYPE_INPUT,
   FRAME_TYPE_MODULE,
+  FRAME_TYPE_WHILE,
   FRAME_TYPE_BLOCK,
   FRAME_TYPE_METHOD_CALL
 };
@@ -811,8 +794,10 @@ struct frame *frp;
   frp = &__frame->base;				\
   frame_jmp_code = setjmp(__frame->jmp_buf);
 
+#define FRAME_RESTART_POP  FRAME_POP
+
 #define FRAME_RESTART_END			\
-  FRAME_POP;					\
+  FRAME_RESTART_POP;				\
   }
 
 struct frame_input {
@@ -861,6 +846,26 @@ struct frame_module {
   FRAME_MODULE_POP;				\
   }
 
+struct frame_while {
+  struct frame_jmp base;
+};
+
+#define FRAME_WHILE_BEGIN					\
+  {								\
+    struct frame_while __frame[1];				\
+    int                frame_jmp_code;				\
+    __frame->base.base.prev = frp;				\
+    __frame->base.base.type = FRAME_TYPE_WHILE;			\
+    __frame->base.base.sp   = sp;				\
+    frp = &__frame->base.base;					\
+    frame_jmp_code = setjmp(__frame->base.jmp_buf);
+
+#define FRAME_WHILE_POP  FRAME_POP
+
+#define FRAME_WHILE_END		\
+  FRAME_WHILE_POP;		\
+  }
+
 struct frame_block {
   struct frame_jmp base;
   obj_t            dict;
@@ -877,8 +882,10 @@ struct frame_block {
   frp = &__frame->base.base;				\
   frame_jmp_code = setjmp(__frame->base.jmp_buf);
 
-#define FRAME_BLOCK_END				\
-  FRAME_POP;					\
+#define FRAME_BLOCK_POP  FRAME_POP
+
+#define FRAME_BLOCK_END					\
+  FRAME_BLOCK_POP;					\
   }
 
 struct frame_method_call {
@@ -897,37 +904,58 @@ struct frame_method_call {
   __frame->args = (_args);			\
   frp = &__frame->base;
 
+#define FRAME_METHOD_CALL_POP  FRAME_POP
+
 #define FRAME_METHOD_CALL_END \
-  FRAME_POP;		      \
+  FRAME_METHOD_CALL_POP;	      \
   }
 
 void
 frame_jmp(unsigned type, int frame_jmp_code)
 {
+  struct frame *p;
+
   switch (type) {
   case FRAME_TYPE_RESTART:
+  case FRAME_TYPE_WHILE:
   case FRAME_TYPE_BLOCK:
     break;
   default:
     HARD_ASSERT(0);
   }
 
-  while (frp) {
-    if (frp->type == type)  longjmp(((struct frame_jmp *) frp)->jmp_buf, frame_jmp_code);
+  for (p = frp; p; p = p->prev) {
+    if (p->type == type)  break;
+  }
 
+  if (p == 0)  return;
+
+  while (frp != p) {
     switch (frp->type) {
+    case FRAME_TYPE_RESTART:
+      FRAME_RESTART_POP;
+      break;
     case FRAME_TYPE_INPUT:
       FRAME_INPUT_POP;
       break;
     case FRAME_TYPE_MODULE:
       FRAME_MODULE_POP;
       break;
+    case FRAME_TYPE_WHILE:
+      FRAME_WHILE_POP;
+      break;
+    case FRAME_TYPE_BLOCK:
+      FRAME_BLOCK_POP;
+      break;
+    case FRAME_TYPE_METHOD_CALL:
+      FRAME_METHOD_CALL_POP;
+      break;
     default:
-      FRAME_POP;
+      HARD_ASSERT(0);
     }
   }
 
-  HARD_ASSERT(0);
+  longjmp(((struct frame_jmp *) frp)->jmp_buf, frame_jmp_code);
 }
 
 /***************************************************************************/
@@ -1424,6 +1452,26 @@ cm_object_print(unsigned argc, obj_t args)
 }
 
 void
+m_obj_printc(obj_t obj, obj_t outf)
+{
+  m_method_call_1(consts.str.tostring, obj);
+  m_method_call_2(consts.str.printc, R0, outf);
+}
+
+void
+cm_object_printc(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 2)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  
+  m_obj_printc(recvr, CAR(CDR(args)));
+
+  vm_assign(0, recvr);
+}
+
+void
 cm_object_append(unsigned argc, obj_t args)
 {
   obj_t recvr, arg;
@@ -1488,6 +1536,73 @@ cm_object_at_put(unsigned argc, obj_t args)
   
   OBJ_ASSIGN(*obj_attr_find(recvr, k), val);
   vm_assign(0, val);
+}
+
+enum { WHILE_CONT = 1, WHILE_BREAK };
+
+void
+cm_object_while(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+    if (argc != 2)  error(ERR_NUM_ARGS);
+    recvr = CAR(args);
+    arg   = CAR(CDR(args));
+
+    FRAME_WHILE_BEGIN {
+
+      switch (frame_jmp_code) {
+      case 0:
+      case WHILE_CONT:
+	for (;;) {
+	  m_method_call_1(consts.str.eval, recvr);
+	  if (!is_kind_of(R0, consts.cl.boolean))  error(ERR_INVALID_VALUE_2, recvr, R0);
+	  if (!BOOLEAN(R0)->val)  break;
+	  m_method_call_1(consts.str.eval, arg);
+	}
+	
+      case WHILE_BREAK:
+	break;
+
+      default:
+	HARD_ASSERT(0);
+      }
+
+    } FRAME_WHILE_END;
+}
+
+void
+cm_object_break(unsigned argc, obj_t args)
+{
+    if (argc != 1)  error(ERR_NUM_ARGS);
+
+    vm_assign(0, CAR(args));
+
+    frame_jmp(FRAME_TYPE_WHILE, WHILE_BREAK);
+
+    error(ERR_WHILE);
+}
+
+void
+cm_object_cont(unsigned argc, obj_t args)
+{
+    if (argc != 1)  error(ERR_NUM_ARGS);
+
+    frame_jmp(FRAME_TYPE_WHILE, WHILE_CONT);
+
+    error(ERR_WHILE);
+}
+
+void
+cm_object_return(unsigned argc, obj_t args)
+{
+    if (argc != 1)  error(ERR_NUM_ARGS);
+
+    vm_assign(0, CAR(args));
+
+    frame_jmp(FRAME_TYPE_BLOCK, 1);
+
+    error(ERR_BLOCK);
 }
 
 /***************************************************************************/
@@ -2620,20 +2735,21 @@ cm_string_eval(unsigned argc, obj_t args)
 }
 
 void
-string_print(obj_t s, FILE *fp)
+string_print(obj_t s, obj_t outf)
 {
-    char     *p, c;
-    unsigned n;
-
-    for (p = STRING(s)->data, n = string_len(s); n; --n, ++p) {
-        c = *p;
-
-        if (isprint(c) || isspace(c)) {
-            putc(c, fp);
-        } else {
-            fprintf(fp, "\\x%02x", * (unsigned char *) p);
-        }
+  FILE     *fp = _FILE(outf)->fp;
+  char     *p, c;
+  unsigned n;
+  
+  for (p = STRING(s)->data, n = string_len(s); n; --n, ++p) {
+    c = *p;
+    
+    if (isprint(c) || isspace(c)) {
+      putc(c, fp);
+    } else {
+      fprintf(fp, "\\x%02x", * (unsigned char *) p);
     }
+  }
 }
 
 void
@@ -2645,7 +2761,8 @@ cm_string_print(unsigned argc, obj_t args)
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.string))  error(ERR_INVALID_ARG, recvr);
   
-  string_print(recvr, stdout);
+  m_file_stdout();
+  string_print(recvr, R0);
   
   vm_assign(0, recvr);
 }
@@ -2661,7 +2778,7 @@ cm_string_printc(unsigned argc, obj_t args)
   arg = CAR(CDR(args));
   if (!is_kind_of(arg, consts.cl.file))      error(ERR_INVALID_ARG, arg);
   
-  string_print(recvr, _FILE(arg)->fp);
+  string_print(recvr, arg);
   
   vm_assign(0, recvr);
 }
@@ -4294,52 +4411,25 @@ m_file_new(obj_t name, obj_t mode, FILE *fp)
   vm_drop();
 }
 
-FILE *
-file_stdin(void)
+void
+m_file_stdin(void)
 {
-  FILE *result;
-
-  vm_push(0);
-
   m_obj_at(consts.cl.file, consts.str._stdin);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
-  result = _FILE(R0)->fp;
-
-  vm_pop(0);
-
-  return (result);
 } 
 
-FILE *
-file_stdout(void)
+void
+m_file_stdout(void)
 {
-  FILE *result;
-
-  vm_push(0);
-
   m_obj_at(consts.cl.file, consts.str._stdout);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stdout", R0);
-  result = _FILE(R0)->fp;
-
-  vm_pop(0);
-
-  return (result);
 } 
  
-FILE *
-file_stderr(void)
+void
+m_file_stderr(void)
 {
-  FILE *result;
-
-  vm_push(0);
-
   m_obj_at(consts.cl.file, consts.str._stderr);
   if (!is_kind_of(R0, consts.cl.file))  error(ERR_INVALID_VALUE_2, "stderr", R0);
-  result = _FILE(R0)->fp;
-
-  vm_pop(0);
-
-  return (result);
 } 
 
 void
@@ -4349,7 +4439,7 @@ m_file_open(obj_t filename, obj_t mode)
 
   fp = fopen(STRING(filename)->data, STRING(mode)->data);
   if (fp == 0) {
-    error(ERR_FILE_OPEN_FAIL, filename, mode, errno);
+    error(ERR_FILE_OPEN_FAIL, errno);
   }
   
   m_file_new(filename, mode, fp);
@@ -4940,8 +5030,9 @@ cm_system_exit(unsigned argc, obj_t args)
 /***************************************************************************/
 
 void
-bt_print(void)
+bt_print(obj_t outf)
 {
+  FILE         *fp = _FILE(outf)->fp;
   struct frame *p;
 
   for (p = frp; p; p = p->prev) {
@@ -4951,11 +5042,11 @@ bt_print(void)
 	struct frame_method_call *q = (struct frame_method_call *) p;
 	
 	if (q->cl) {
-	  m_method_call_1(consts.str.print, q->cl);
-	  putchar('.');
+	  m_method_call_2(consts.str.printc, q->cl, outf);
+	  fprintf(fp, ".");
 	}
-	m_method_call_1(consts.str.print, q->sel);
-	m_method_call_1(consts.str.print, q->args);
+	m_method_call_2(consts.str.printc, q->sel, outf);
+	m_method_call_2(consts.str.printc, q->args, outf);
 	putchar('\n');
       }
       break;
@@ -4964,7 +5055,7 @@ bt_print(void)
 	struct frame_input *q = (struct frame_input *) p;
 
 	if (q->inp_desc.fp) {
-	  printf("In file %s, line %u:\n", q->inp_desc.filename, q->inp_desc.line);
+	  fprintf(fp, "In file %s, line %u:\n", q->inp_desc.filename, q->inp_desc.line);
 	}
       }
       break;
@@ -4979,23 +5070,162 @@ error(unsigned errcode, ...)
 {
   static unsigned lvl;
 
+  obj_t   outf;
+  FILE    *fp;
   va_list ap;
 
   if (++lvl > 1)  fatal(FATAL_DOUBLE_ERR);
 
-  HARD_ASSERT(errcode < ARRAY_SIZE(error_msgs));
-
+  m_file_stderr();
+  outf = R0;
+  fp   = _FILE(outf)->fp;
   va_start(ap, errcode);
 
-  fprintf(stderr, "%s\n", error_msgs[errcode]);
+  switch (errcode) {
+  case ERR_STACK_OVF:
+    fprintf(fp, "Stack overflow\n");
+    break;
+  case ERR_NUM_ARGS:
+    fprintf(fp, "Incorrent number of arugments\n");
+    break;
+  case ERR_INVALID_ARG:
+    {
+      obj_t arg = va_arg(ap, obj_t);
 
-  bt_print();
+      fprintf(fp, "Invaliad argument: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_INVALID_VALUE:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Invalid value: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_INVALID_VALUE_2:
+    {
+      char  *nm = va_arg(ap, char *);
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Invalid value for %s: ", nm);
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_INVALID_METHOD:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Invalid method: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_NO_METHOD:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "No such method: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_NO_ATTR:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "No such attribute: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_BAD_FORM:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Bad form: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_NOT_BOUND:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Symbol not bound: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_OVF:
+    fprintf(fp, "Arithmetic overflow\n");
+    break;
+  case ERR_IDX_RANGE:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Index out of range: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_IDX_RANGE_2:
+    {
+      obj_t arg1 = va_arg(ap, obj_t);
+      obj_t arg2 = va_arg(ap, obj_t);
+
+      fprintf(fp, "Range out of range: ");
+      m_obj_printc(arg1, outf);
+      fprintf(fp, ", ");
+      m_obj_printc(arg2, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_CONST:
+    {
+      obj_t arg = va_arg(ap, obj_t);
+
+      fprintf(fp, "Write to constant: ");
+      m_obj_printc(arg, outf);
+      fprintf(fp, "\n");
+    }
+    break;
+  case ERR_FILE_OPEN_FAIL:
+    {
+      int errnum = va_arg(ap, int);
+
+      fprintf(fp, "File open failed: %s\n", sys_errlist[errnum]);
+    }
+    break;
+  case ERR_MODULE_OPEN_FAIL:
+    fprintf(fp, "Module open failed\n");
+    break;
+  case ERR_WHILE:
+    fprintf(fp, "Not within while\n");
+    break;
+  case ERR_BLOCK:
+    fprintf(fp, "Not within block\n");
+    break;
+  case ERR_ASSERT_FAIL:
+    fprintf(fp, "Assertion failed\n");
+    break;
+  default:
+    HARD_ASSERT(0);
+  }
+
+  bt_print(outf);
 
   va_end(ap);
   
   --lvl;
 
   frame_jmp(FRAME_TYPE_RESTART, 1);
+
+  HARD_ASSERT(0);
 }
 
 /***************************************************************************/
@@ -5319,8 +5549,13 @@ const struct {
   { &consts.cl.object, &consts.str.equalsc,     cm_object_eq },
   { &consts.cl.object, &consts.str.tostring,    cm_object_tostring },
   { &consts.cl.object, &consts.str.print,       cm_object_print },
+  { &consts.cl.object, &consts.str.printc,      cm_object_printc },
   { &consts.cl.object, &consts.str.atc,         cm_object_at },
   { &consts.cl.object, &consts.str.atc_putc,    cm_object_at_put },
+  { &consts.cl.object, &consts.str.whilec,      cm_object_while },
+  { &consts.cl.object, &consts.str._break,      cm_object_break },
+  { &consts.cl.object, &consts.str._continue,   cm_object_cont },
+  { &consts.cl.object, &consts.str._return,     cm_object_return },
 
   { &consts.cl.code_method, &consts.str.evalc, cm_code_method_eval },
 

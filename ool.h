@@ -118,6 +118,4 @@ void m_string_dict_new(unsigned size);
 void m_dict_new(unsigned size);
 void m_module_new(obj_t name, obj_t parent);
 void m_file_new(obj_t name, obj_t mode, FILE *fp);
-FILE *file_stdin(void);
-FILE *file_stdout(void);
-FILE *file_stderr(void);
+void m_file_stdin(void), m_file_stdout(void), m_file_stderr(void);
