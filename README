@@ -3,8 +3,9 @@ README
 DESIGN GOALS
 
 Minimalism
-Regularity
-Everything is a first-class object
+Uniformity
+- Everything is a first-class object
+- Uniform method names
 Functional programming
 Borrowing
 - Smalltalk: method invocation style

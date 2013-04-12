@@ -11,168 +11,6 @@
 #include "ool.h"
 #include "scanner.h"
 
-#undef  PTR_64_BITS
-
-
-#ifndef NDEBUG
-#define ASSERT(x)  assert(x)
-#else
-#define ASSERT(x)
-#endif
-#define HARD_ASSERT  assert
-
-#define ARRAY_SIZE(a)  (sizeof(a) / sizeof((a)[0]))
-#ifdef PTR_64_BITS
-#define PTR_TO_INT(x)  ((long long)(x))
-#else
-#define PTR_TO_INT(x)  ((long)(x))
-#endif
-#define FIELD_OFS(s, f)                   PTR_TO_INT(&((s *) 0)->f)
-#define FIELD_PTR_TO_STRUCT_PTR(p, s, f)  ((s *)((char *)(p) - FIELD_OFS(s, f)))
-
-obj_t inst_of(obj_t obj);
-unsigned is_kind_of(obj_t obj, obj_t cl);
-
-struct inst_metaclass {
-  struct obj base[1];
-  obj_t      name, parent, module;
-  obj_t      cl_vars, cl_methods, inst_vars, inst_methods;
-  unsigned   inst_size;
-  void       (*inst_init)(obj_t cl, obj_t inst, va_list ap);
-  void       (*inst_walk)(obj_t cl, obj_t inst, void (*func)(obj_t));
-  void       (*inst_free)(obj_t cl, obj_t inst);
-};
-#define CLASS(x)    ((struct inst_metaclass *)(x))
-void inst_walk_metaclass(obj_t inst, void (*func)(obj_t));
-unsigned is_subclass_of(obj_t cl1, obj_t cl2);
-void m_fqclname(obj_t cl);
-
-struct inst_code_method {
-  struct obj base[1];
-  void       (*func)(unsigned argc, obj_t args);
-};
-#define CODE_METHOD(x)  ((struct inst_code_method *)(x))
-
-struct inst_boolean {
-  struct obj base[1];
-  unsigned   val;
-};
-#define BOOLEAN(x)  ((struct inst_boolean *)(x))
-
-struct inst_integer {
-  struct obj base[1];
-  integer_val_t  val;
-};
-#define INTEGER(x)  ((struct inst_integer *)(x))
-
-struct inst_float {
-  struct obj  base[1];
-  float_val_t val;
-};
-#define FLOAT(x)  ((struct inst_float *)(x))
-
-struct inst_string {
-  struct obj base[1];
-  unsigned   size;		/* N.B. Includes the '\0' terminator */
-  char       *data;
-};
-#define STRING(x)  ((struct inst_string *)(x))
-unsigned string_len(obj_t s);
-
-struct inst_dptr {
-  struct obj base[1];
-  obj_t      car, cdr;
-};
-#define DPTR(x)  ((struct inst_dptr *)(x))
-#define CAR(x)   (DPTR(x)->car)
-#define CDR(x)   (DPTR(x)->cdr)
-unsigned list_len(obj_t li);
-
-struct inst_method_call {
-  struct obj base[1];
-  obj_t      list;
-};
-#define METHOD_CALL(x)  ((struct inst_method_call *)(x))
-
-struct inst_block {
-  struct obj base[1];
-  obj_t      list;
-};
-#define BLOCK(x)  ((struct inst_block *)(x))
-
-struct inst_array {
-  struct obj base[1];
-  unsigned   size;
-  obj_t      *data;
-};
-#define ARRAY(x)  ((struct inst_array *)(x))
-obj_t array_at(obj_t arr, integer_val_t idx);
-void  array_at_put(obj_t arr, integer_val_t idx, obj_t val);
-
-struct inst_dict {
-  struct inst_array base[1];
-  unsigned (*key_hash)(obj_t key);
-  unsigned (*key_equal)(obj_t key1, obj_t key2);
-};
-#define DICT(x)  ((struct inst_dict *)(x))
-obj_t    dict_at(obj_t dict, obj_t key);
-void     dict_at_put(obj_t dict, obj_t key, obj_t val);
-void     dict_del(obj_t dict, obj_t key);
-unsigned dict_count(obj_t dict);
-void  m_dict_keys(obj_t dict);
-
-struct inst_file {
-  struct obj base[1];
-  obj_t      name, mode;
-  FILE       *fp;
-};
-#define _FILE(x)  ((struct inst_file *)(x))
-
-struct inst_module {
-  struct inst_dict base[1];
-  obj_t            name, parent;
-  void             *cookie;	/* Cookie from dl_open() */
-};
-#define MODULE(x)  ((struct inst_module *)(x))
-void m_fqmodname(obj_t mod);
-
-obj_t env_at(obj_t s);
-void  env_new_put(obj_t s, obj_t val);
-void  env_at_put(obj_t s, obj_t val);
-void  env_del(obj_t s);
-
-/*
-  Class instance relationship
-
-    Metaclass [i.e. inst_of(Metaclass) == NIL]
-      Object
-      Boolean
-      Integer
-      ...
-
-  Class parent relationship (hierarchy)
-
-    Object  [i.e. parent(Object) == NIL]
-      Metaclass
-      Boolean
-      Integer
-      ...
-
-  Note that this leads to the following reference cycles:
-  - parent(inst_of(Object)) == Object
-  - inst_of(name(String)) == String
-*/
-
-obj_t *stack, *stack_end, *sp;
-#define STACK_SIZE  8192	/* In objects */
-obj_t module_main, module_cur;
-
-/* The root set is made up of:
-   - VM registers       (regs)
-   - VM stack           (stack..stack_end)
-   - main module        (module_main)
-   - internal constants (consts)
-*/
 
 #ifndef NDEBUG
 
@@ -328,12 +166,6 @@ crc32(void *buf, unsigned size)
 
 /***************************************************************************/
 
-enum {
-  FATAL_DOUBLE_ERR,
-  FATAL_NO_MEM,
-  FATAL_STACK_UNF,
-};
-
 const char * const fatal_msgs[] = {
   "Double error",
   "Out of memory",
@@ -349,30 +181,6 @@ fatal(unsigned errcode)
 
   abort();
 }
-
-enum {
-  ERR_STACK_OVF,
-  ERR_NUM_ARGS,
-  ERR_INVALID_ARG,
-  ERR_INVALID_VALUE,
-  ERR_INVALID_VALUE_2,
-  ERR_INVALID_METHOD,
-  ERR_NO_METHOD,
-  ERR_NO_ATTR,
-  ERR_BAD_FORM,
-  ERR_NOT_BOUND,
-  ERR_OVF,
-  ERR_IDX_RANGE,
-  ERR_IDX_RANGE_2,
-  ERR_CONST,
-  ERR_FILE_OPEN_FAIL,
-  ERR_MODULE_OPEN_FAIL,
-  ERR_WHILE,
-  ERR_BLOCK,
-  ERR_ASSERT_FAIL
-};
-
-void error(unsigned errcode, ...);
 
 /***************************************************************************/
 
@@ -602,12 +410,6 @@ root_walk(void (*func)(obj_t))
   for (q = regs, n = ARRAY_SIZE(regs); n; --n, ++q)  (*func)(*q);
   for (q = sp; q < stack_end; ++q)  (*func)(*q);
   (*func)(module_main);
-  for (q = (obj_t *) &consts, n = sizeof(consts) / sizeof(obj_t);
-       n;
-       --n, ++q
-       ) {
-    (*func)(*q);
-  }
 }
 
 void
@@ -4669,6 +4471,8 @@ inst_init_module(obj_t cl, obj_t inst, va_list ap)
 {
   OBJ_ASSIGN(MODULE(inst)->name,   va_arg(ap, obj_t));
   OBJ_ASSIGN(MODULE(inst)->parent, va_arg(ap, obj_t));
+  MODULE(inst)->root_consts  = va_arg(ap, obj_t *);
+  MODULE(inst)->root_nconsts = va_arg(ap, unsigned);
 
   inst_init_parent(cl, inst, ap);
 }
@@ -4676,8 +4480,17 @@ inst_init_module(obj_t cl, obj_t inst, va_list ap)
 void
 inst_walk_module(obj_t cl, obj_t inst, void (*func)(obj_t))
 {
+  obj_t    *p;
+  unsigned n;
+
   (*func)(MODULE(inst)->name);
   (*func)(MODULE(inst)->parent);
+
+  for (p = MODULE(inst)->root_consts, n = MODULE(inst)->root_nconsts;
+       n;
+       --n, ++p) {
+    (*func)(*p);
+  }
 
   inst_walk_parent(cl, inst, func);
 }
@@ -4687,18 +4500,39 @@ inst_free_module(obj_t cl, obj_t inst)
 {
   void *cookie;
 
-  if (cookie = MODULE(inst)->cookie)  dlclose(cookie);
+  if (cookie = MODULE(inst)->dl_cookie) {
+    obj_t mn = MODULE(inst)->name;
+    void  *fini_func;
+
+    vm_push(0);
+
+    m_string_new(2, string_len(mn), STRING(mn)->data,
+		    12, "_module_fini"
+		 );
+    fini_func = dlsym(cookie, STRING(R0)->data);
+    HARD_ASSERT(fini_func);
+
+    FRAME_MODULE_BEGIN(inst) {
+
+      (* (void (*)(void)) fini_func)();
+
+    } FRAME_MODULE_END;
+
+    dlclose(cookie);
+
+    vm_pop(0);
+  }
   
   inst_free_parent(cl, inst);
 }
 
 void
-m_module_new(obj_t name, obj_t parent)
+m_module_new(obj_t name, obj_t parent, obj_t *root_consts, unsigned root_nconsts)
 {
   vm_push(0);
 
   vm_inst_alloc(consts.cl.module);
-  inst_init(R0, name, parent, string_hash, string_equal, 32);
+  inst_init(R0, name, parent, root_consts, root_nconsts, string_hash, string_equal, 32);
   
   if (parent) {
     dict_at_put(OBJ(MODULE(parent)->base), name, R0);
@@ -4749,10 +4583,26 @@ cm_module_new(unsigned argc, obj_t args)
 		 );
     cookie = dlopen(STRING(R0)->data, RTLD_NOW);
     if (cookie) {
-      m_module_new(name, module_cur);
-      MODULE(R0)->cookie = cookie;
+      void *init_func;
 
-      goto done;
+      m_string_new(2, string_len(name), name,
+		      12, "_module_init"
+		   );
+      init_func = dlsym(cookie, STRING(R0)->data);
+      if (init_func) {
+	m_module_new(name, module_cur, 0, 0);
+	MODULE(R0)->dl_cookie = cookie;
+
+	FRAME_MODULE_BEGIN(R0) {
+
+	  (* (void (*)(void)) init_func)();
+
+	} FRAME_MODULE_END;
+	
+	goto done;
+      }
+
+      dlclose(cookie);
     }
 
     m_string_new(2, string_len(R3), STRING(R3)->data,
@@ -4763,10 +4613,9 @@ cm_module_new(unsigned argc, obj_t args)
       m_file_new(R0, R1, fp);
       vm_assign(1, R0);		/* R1 = file */
       
-      m_module_new(name, module_cur);
-      vm_assign(2, R0);		/* R2 = module */
+      m_module_new(name, module_cur, 0, 0);
       
-      FRAME_MODULE_BEGIN(R2) {
+      FRAME_MODULE_BEGIN(R0) {
 	
 	m_file_load(R1);
 	
@@ -5230,14 +5079,7 @@ error(unsigned errcode, ...)
 
 /***************************************************************************/
 
-const struct {
-  obj_t    *cl, *name, *parent;
-  unsigned inst_size;
-  void     (*inst_init)(obj_t cl, obj_t inst, va_list ap);
-  void     (*inst_walk)(obj_t cl, obj_t inst, void (*func)(obj_t));
-  void     (*inst_free)(obj_t cl, obj_t inst);
-  void     (*cl_init)(void);
-} init_cl_tbl[] = {
+const struct init_cl init_cl_tbl[] = {
   { &consts.cl.metaclass,
     &consts.str.metaclass,
     &consts.cl.object,
@@ -5379,10 +5221,7 @@ const struct {
   }
 };
 
-const struct {
-  obj_t *obj;
-  char  *str;
-} init_str_tbl[] = {
+const struct init_str init_str_tbl[] = {
     { &consts.str.array,       "#Array" },
     { &consts.str.block,       "#Block" },
     { &consts.str.boolean,     "#Boolean" },
@@ -5489,10 +5328,7 @@ const struct {
 #endif
 };
 
-const struct {
-  obj_t *cl, *sel;
-  void  (*func)(unsigned, obj_t);
-} init_cl_method_tbl[] = {
+const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.metaclass, &consts.str.name,                   cm_metaclass_name },
   { &consts.cl.metaclass, &consts.str.tostring,               cm_metaclass_name },
   { &consts.cl.metaclass, &consts.str.parent,                 cm_metaclass_parent },
@@ -5762,7 +5598,7 @@ init(void)
 
   /* Step 5. Create main module */
 
-  m_module_new(consts.str.main, NIL);
+  m_module_new(consts.str.main, NIL, (obj_t *) &consts, sizeof(consts) / sizeof(obj_t));
   OBJ_ASSIGN(module_main, R0);
 
   dict_at_put(OBJ(MODULE(module_main)->base),

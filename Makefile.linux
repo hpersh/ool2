@@ -15,8 +15,7 @@ ool: scanner.l scanner.h grammar.y ool.c ool.h
 	./ool test
 
 socket.so: socket.c
-	$(CC) -fPIC -c socket.c
-	$(CC) -shared -Wl,-soname,socket.so -o socket.so socket.o
+	$(CC) -fPIC -shared -c -o socket.so socket.c
 
 math.so: math.c
 	$(CC) -fPIC -c math.c
