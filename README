@@ -23,20 +23,40 @@ GRAMMAR
 
 An expression is one of: an atom, a pair, a list, a method call, or a block.
 
-An atom is one of: a number, a symbol or a string.
-Examples: 13, 0x13, -45.67, sam, "This is a string"
+Atom
+
+An atom is one of: a number, a boolean, #nil, or a string.
+Examples: 13, 0x13, -45.67, #true, sam, "This is a string"
+
+The evaluated value of an atom is itself, with the the exception of strings, which evaluate to the value bound to the string in the environment.
+
+Pair
 
 A pair is a left paren ('('), an expression, a comma (','), an expression, and a right paren (')').
 Example: (1, 2)
 
+The evaluated value of a pair is a pair of the evaluated values of each of its constituents.
+
+List
+
 A list is a left paren ('('), followed by 0 or more expressions, separated by spaces, and a right paren (')').
 Example: (this is a list)
+
+The evaluated value if a list is a list of the evaluated values of each of its constituents.
+
+Method call
 
 A method call is a left square bracket ('['), followed by interleaved expressions and selectors, separated by spaces, followed by a right square bracket (']').
 Example: [1 add: 2]
 
+The evaluated value of a method call is the result of calling the given method with the given arguments.
+
+Block
+
 A block is a left brace ('{'), followed by a list, followed by a sequence of expressions, separated by spaces, followed by a right brace ('}').
 Example: {(a b) [a add: b]}
+
+The evaluated value of a block is itself.
 
 Short forms
 
@@ -53,7 +73,7 @@ TODO
 Bugs
 
 Features
-- while, return
+- Shared-object modules
 
 Enhancements
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
@@ -61,6 +81,9 @@ Enhancements
   are separated by periods?  Or xxx@yyy@zzz?
 - Scoped instance vars and methods; private, protected, public
 - Read only object attributes vs. acessor methods?
+
+Gotchas?
+- break can operate across block boundaries
 
 Optimizations
 - Make m_xxx functions return a value, too
