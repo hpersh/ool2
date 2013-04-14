@@ -376,6 +376,8 @@ obj_alloc(obj_t cl)
 void
 obj_free(obj_t obj)
 {
+  inst_free(obj);
+
   list_erase(obj->list_node);
 
   _cfree(CLASS(inst_of(obj))->inst_size, obj);
@@ -402,7 +404,6 @@ obj_release(obj_t obj)
       )  return;
 
   inst_walk(obj, obj_release);
-  inst_free(obj);
 
   obj_free(obj);
 }
