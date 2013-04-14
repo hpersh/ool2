@@ -4545,26 +4545,13 @@ inst_free_module(obj_t cl, obj_t inst)
   void *cookie;
 
   if (cookie = MODULE(inst)->dl_cookie) {
-    obj_t mn = MODULE(inst)->name;
-    void  *fini_func;
-
-    vm_push(0);
-
-    m_string_new(2, string_len(mn), STRING(mn)->data,
-		    12, "_module_fini"
-		 );
-    fini_func = dlsym(cookie, STRING(R0)->data);
-    HARD_ASSERT(fini_func);
-
     FRAME_MODULE_BEGIN(inst) {
 
-      (* (void (*)(void)) fini_func)();
+      (* MODULE(inst)->fini_func)();
 
     } FRAME_MODULE_END;
 
     dlclose(cookie);
-
-    vm_pop(0);
   }
   
   inst_free_parent(cl, inst);
@@ -4627,15 +4614,20 @@ cm_module_new(unsigned argc, obj_t args)
 		 );
     cookie = dlopen(STRING(R0)->data, RTLD_NOW);
     if (cookie) {
-      void *init_func;
+      void *init_func, *fini_func;
 
       m_string_new(2, string_len(name), STRING(name)->data,
 		      12, "_module_init"
 		   );
       init_func = dlsym(cookie, STRING(R0)->data);
-      if (init_func) {
+      m_string_new(2, string_len(name), STRING(name)->data,
+		      12, "_module_fini"
+		   );
+      fini_func = dlsym(cookie, STRING(R0)->data);
+      if (init_func && fini_func) {
 	m_module_new(name, module_cur);
 	MODULE(R0)->dl_cookie = cookie;
+	MODULE(R0)->fini_func = (void (*)(void)) fini_func;
 
 	FRAME_MODULE_BEGIN(R0) {
 

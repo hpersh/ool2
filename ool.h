@@ -174,6 +174,7 @@ struct inst_module {
   struct inst_dict base[1];
   obj_t            name, parent;
   void             *dl_cookie;	/* Cookie from dl_open() */
+  void             (*fini_func)(void);
   obj_t            *consts;
   unsigned         nconsts;
 };

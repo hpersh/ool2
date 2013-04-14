@@ -215,6 +215,5 @@ socket_module_init(void)
 void
 socket_module_fini(void)
 {
-    /* TODO: Need to delete from root set */
 }
 
