@@ -11,6 +11,29 @@
 #include "ool.h"
 #include "scanner.h"
 
+/* DESIGN NOTE
+
+All objects must be accessible to the memory management subsystem, i.e. the garbage collector.
+The garbage collector needs to know which objects are active.  The basis of active objects is
+the root set.
+
+The root set consists of:
+- the VM registers,
+- the VM stack, and
+- the main module.
+
+Whenever a new object is created, it must be held in something accessible from the root set.
+By convention, all object constructors return the new object in R0.
+
+Objects can be passed around as C function arguments, as long as they are objects already
+accessible from the root set.
+
+Any function that uses a VM register must save and restore the register's value.
+This includes R0, even if a new value will be returned in R0, because an input parameter
+may be an object held only in R0.
+*/
+
+
 
 #ifndef NDEBUG
 
@@ -142,27 +165,25 @@ const unsigned crc32_tbl[] = {
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-unsigned crc_val;
-
 void
-crc32_init(void)
+_crc32_init(unsigned *r)
 {
-  crc_val = 0xffffffff;
+  *r = 0xffffffff;
 }
+#define CRC32_INIT(r)  (_crc32_init(&(r)))
 
 unsigned
-crc32(void *buf, unsigned size)
+_crc32(unsigned *r, void *buf, unsigned n)
 {
   unsigned char *p = (unsigned char *) buf;
 
-  crc_val = ~crc_val;
-  
-  for ( ; size; --size, ++p) {
-    crc_val = crc32_tbl[(crc_val ^ *p) & 0xFF] ^ (crc_val >> 8);
+  for ( ; n; --n, ++p) {
+    *r = crc32_tbl[(*r ^ *p) & 0xFF] ^ (*r >> 8);
   }
   
-  return (~crc_val);
+  return (~*r);
 }
+#define CRC32(r, p, n)  (_crc32(&(r), (p), (n)))
 
 /***************************************************************************/
 
@@ -974,9 +995,28 @@ cm_metaclass_inst_vars(unsigned argc, obj_t args)
 void
 inst_init_class(obj_t cl, obj_t inst, va_list ap)
 {
+  vm_push(0);
+
   OBJ_ASSIGN(CLASS(inst)->name,   va_arg(ap, obj_t));
   OBJ_ASSIGN(CLASS(inst)->parent, va_arg(ap, obj_t));
   OBJ_ASSIGN(CLASS(inst)->module, va_arg(ap, obj_t));
+  CLASS(inst)->inst_size = va_arg(ap, unsigned);
+  CLASS(inst)->inst_init = va_arg(ap, void (*)(obj_t cl, obj_t inst, va_list ap));
+  CLASS(inst)->inst_walk = va_arg(ap, void (*)(obj_t cl, obj_t inst, void (*func)(obj_t)));
+  CLASS(inst)->inst_free = va_arg(ap, void (*)(obj_t cl, obj_t inst));
+
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(inst)->cl_vars, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(inst)->cl_methods, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(inst)->inst_vars, R0);
+  m_string_dict_new(16);
+  OBJ_ASSIGN(CLASS(inst)->inst_methods, R0);
+  
+  dict_at_put(OBJ(MODULE(CLASS(inst)->module)->base), CLASS(inst)->name, inst);
+
+  vm_pop(0);
 
   inst_init_parent(cl, inst, ap);
 }
@@ -996,12 +1036,19 @@ inst_free_class(obj_t cl, obj_t inst)
 }
 
 void
-m_class_new(obj_t name, obj_t parent, obj_t module)
+m_class_new(obj_t    name,
+	    obj_t    parent,
+	    obj_t    module, 
+	    unsigned inst_size,
+	    void     (*_inst_init)(obj_t cl, obj_t inst, va_list ap),
+	    void     (*_inst_walk)(obj_t cl, obj_t inst, void (*func)(obj_t)),
+	    void     (*_inst_free)(obj_t cl, obj_t inst)
+	    )
 {
   vm_push(0);
 
   vm_inst_alloc(consts.cl.metaclass);
-  inst_init(R0, name, parent, module);
+  inst_init(R0, name, parent, module, inst_size, _inst_init, _inst_walk, _inst_free);
 
   vm_drop();
 }
@@ -1058,28 +1105,20 @@ cm_class_new(unsigned argc, obj_t args)
 
   vm_push(1);
 
-  m_class_new(name, parent, module_cur);
+  m_class_new(name,
+	      parent,
+	      module_cur,
+	      CLASS(parent)->inst_size + list_len(inst_vars) * sizeof(obj_t),
+	      inst_init_user,
+	      inst_walk_user,
+	      inst_free_user
+	      );
   vm_assign(1, R0);
-
-  m_string_dict_new(16);
-  OBJ_ASSIGN(CLASS(R1)->cl_vars, R0);
-  m_string_dict_new(16);
-  OBJ_ASSIGN(CLASS(R1)->cl_methods, R0);
-  m_string_dict_new(16);
-  OBJ_ASSIGN(CLASS(R1)->inst_vars, R0);
-  m_string_dict_new(16);
-  OBJ_ASSIGN(CLASS(R1)->inst_methods, R0);
-  CLASS(R1)->inst_size = CLASS(parent)->inst_size + list_len(inst_vars) * sizeof(obj_t);
-  CLASS(R1)->inst_init = inst_init_user;
-  CLASS(R1)->inst_walk = inst_walk_user;
-  CLASS(R1)->inst_free = inst_free_user;
 
   for (ofs = CLASS(parent)->inst_size; inst_vars; inst_vars = CDR(inst_vars), ofs += sizeof(obj_t)) {
     m_integer_new(ofs);
     dict_at_put(CLASS(R1)->inst_vars, CAR(inst_vars), R0);
   }
-
-  dict_at_put(OBJ(MODULE(module_cur)->base), name, R1);
 
   vm_assign(0, R1);
 
@@ -1230,9 +1269,11 @@ cm_object_tostring(unsigned argc, obj_t args)
     return;
   }
   
+  m_fqclname(inst_of(recvr));
+
   m_string_new(1,
 	       snprintf(buf, sizeof(buf), "<instance of %s @ %p>",
-			STRING(CLASS(inst_of(recvr))->name)->data,
+			STRING(R0)->data,
 			recvr
 			),
 	       buf
@@ -1782,14 +1823,15 @@ cm_integer_tostring_base(unsigned argc, obj_t args)
 void
 cm_integer_hash(unsigned argc, obj_t args)
 {
-  obj_t recvr;
+  obj_t    recvr;
+  unsigned r;
   
   if (argc != 1)                              error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.integer))  error(ERR_INVALID_ARG, recvr);
   
-  crc32_init();
-  m_integer_new(crc32(&INTEGER(recvr)->val, sizeof(INTEGER(recvr)->val)));
+  CRC32_INIT(r);
+  m_integer_new(CRC32(r, &INTEGER(recvr)->val, sizeof(INTEGER(recvr)->val)));
 }
 
 void
@@ -2300,14 +2342,15 @@ cm_float_minus(unsigned argc, obj_t args)
 void
 cm_float_hash(unsigned argc, obj_t args)
 {
-  obj_t recvr;
+  obj_t    recvr;
+  unsigned r;
 
   if (argc != 1)                             error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
 
-  crc32_init();
-  m_integer_new(crc32(&FLOAT(recvr)->val, sizeof(FLOAT(recvr)->val)));
+  CRC32_INIT(r);
+  m_integer_new(CRC32(r, &FLOAT(recvr)->val, sizeof(FLOAT(recvr)->val)));
 }
 
 void
@@ -2429,9 +2472,11 @@ string_len(obj_t s)
 unsigned
 string_hash(obj_t s)
 {
-  crc32_init();
+  unsigned r;
 
-  return (crc32(STRING(s)->data, string_len(s)));
+  CRC32_INIT(r);
+
+  return (CRC32(r, STRING(s)->data, string_len(s)));
 }
 
 unsigned
@@ -4471,8 +4516,6 @@ inst_init_module(obj_t cl, obj_t inst, va_list ap)
 {
   OBJ_ASSIGN(MODULE(inst)->name,   va_arg(ap, obj_t));
   OBJ_ASSIGN(MODULE(inst)->parent, va_arg(ap, obj_t));
-  MODULE(inst)->root_consts  = va_arg(ap, obj_t *);
-  MODULE(inst)->root_nconsts = va_arg(ap, unsigned);
 
   inst_init_parent(cl, inst, ap);
 }
@@ -4486,7 +4529,7 @@ inst_walk_module(obj_t cl, obj_t inst, void (*func)(obj_t))
   (*func)(MODULE(inst)->name);
   (*func)(MODULE(inst)->parent);
 
-  for (p = MODULE(inst)->root_consts, n = MODULE(inst)->root_nconsts;
+  for (p = MODULE(inst)->consts, n = MODULE(inst)->nconsts;
        n;
        --n, ++p) {
     (*func)(*p);
@@ -4527,12 +4570,12 @@ inst_free_module(obj_t cl, obj_t inst)
 }
 
 void
-m_module_new(obj_t name, obj_t parent, obj_t *root_consts, unsigned root_nconsts)
+m_module_new(obj_t name, obj_t parent)
 {
   vm_push(0);
 
   vm_inst_alloc(consts.cl.module);
-  inst_init(R0, name, parent, root_consts, root_nconsts, string_hash, string_equal, 32);
+  inst_init(R0, name, parent, string_hash, string_equal, 32);
   
   if (parent) {
     dict_at_put(OBJ(MODULE(parent)->base), name, R0);
@@ -4585,12 +4628,12 @@ cm_module_new(unsigned argc, obj_t args)
     if (cookie) {
       void *init_func;
 
-      m_string_new(2, string_len(name), name,
+      m_string_new(2, string_len(name), STRING(name)->data,
 		      12, "_module_init"
 		   );
       init_func = dlsym(cookie, STRING(R0)->data);
       if (init_func) {
-	m_module_new(name, module_cur, 0, 0);
+	m_module_new(name, module_cur);
 	MODULE(R0)->dl_cookie = cookie;
 
 	FRAME_MODULE_BEGIN(R0) {
@@ -4613,7 +4656,7 @@ cm_module_new(unsigned argc, obj_t args)
       m_file_new(R0, R1, fp);
       vm_assign(1, R0);		/* R1 = file */
       
-      m_module_new(name, module_cur, 0, 0);
+      m_module_new(name, module_cur);
       
       FRAME_MODULE_BEGIN(R0) {
 	
@@ -5508,6 +5551,58 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.file, &consts.str.load,     cm_file_load }
 };
 
+void
+init_cls(const struct init_cl *tbl, unsigned n)
+{
+  for ( ; n; --n, ++tbl) {
+    void (*f)(void);
+    
+    m_class_new(*tbl->name,
+		*tbl->parent,
+		module_cur, 
+		tbl->inst_size,
+		tbl->inst_init,
+		tbl->inst_walk,
+		tbl->inst_free
+		);
+    OBJ_ASSIGN(*tbl->cl, R0);
+
+    if (f = tbl->cl_init)  (*f)();
+  }
+}
+
+void
+init_strs(const struct init_str *tbl, unsigned n)
+{
+  for ( ; n; --n, ++tbl) {
+    m_string_new(1, strlen(tbl->str), tbl->str);
+    OBJ_ASSIGN(*tbl->obj, R0);
+  }
+}
+
+void
+init_cl_methods(const struct init_method *tbl, unsigned n)
+{
+  for ( ; n; --n, ++tbl) {
+    m_code_method_new(tbl->func);
+    dict_at_put(CLASS(*tbl->cl)->cl_methods,
+		*tbl->sel,
+		R0
+		);
+  }
+}
+
+void
+init_inst_methods(const struct init_method *tbl, unsigned n)
+{
+  for ( ; n; --n, ++tbl) {
+    m_code_method_new(tbl->func);
+    dict_at_put(CLASS(*tbl->cl)->inst_methods,
+		*tbl->sel,
+		R0
+		);
+  }
+}
 
 void
 init(void)
@@ -5555,10 +5650,7 @@ init(void)
   inst_init(R0, 1);
   OBJ_ASSIGN(consts._bool._true, R0);
   
-  for (i = 0; i < ARRAY_SIZE(init_str_tbl); ++i) {
-    m_string_new(1, strlen(init_str_tbl[i].str), init_str_tbl[i].str);
-    OBJ_ASSIGN(*init_str_tbl[i].obj, R0);
-  }
+  init_strs(init_str_tbl, ARRAY_SIZE(init_str_tbl));
 
   /* Step 4. Create classes, second pass */
 
@@ -5574,21 +5666,9 @@ init(void)
     OBJ_ASSIGN(CLASS(*init_cl_tbl[i].cl)->inst_methods, R0);
   }  
 
-  for (i = 0; i < ARRAY_SIZE(init_cl_method_tbl); ++i) {
-    m_code_method_new(init_cl_method_tbl[i].func);
-    dict_at_put(CLASS(*init_cl_method_tbl[i].cl)->cl_methods,
-		*init_cl_method_tbl[i].sel,
-		R0
-		);
-  }
+  init_cl_methods(init_cl_method_tbl, ARRAY_SIZE(init_cl_method_tbl));
 
-  for (i = 0; i < ARRAY_SIZE(init_inst_method_tbl); ++i) {
-    m_code_method_new(init_inst_method_tbl[i].func);
-    dict_at_put(CLASS(*init_inst_method_tbl[i].cl)->inst_methods,
-		*init_inst_method_tbl[i].sel,
-		R0
-		);
-  }
+  init_inst_methods(init_inst_method_tbl, ARRAY_SIZE(init_inst_method_tbl));
 
   for (i = 0; i < ARRAY_SIZE(init_cl_tbl); ++i) {
     void (*f)(void);
@@ -5598,7 +5678,10 @@ init(void)
 
   /* Step 5. Create main module */
 
-  m_module_new(consts.str.main, NIL, (obj_t *) &consts, sizeof(consts) / sizeof(obj_t));
+  m_module_new(consts.str.main, NIL);
+  MODULE(R0)->consts  = (obj_t *) &consts;
+  MODULE(R0)->nconsts = sizeof(consts) / sizeof(obj_t);
+
   OBJ_ASSIGN(module_main, R0);
 
   dict_at_put(OBJ(MODULE(module_main)->base),

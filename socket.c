@@ -15,19 +15,19 @@ struct inst_socket {
 
 struct {
     struct {
-	obj_t socket;
-    } cl;
-    struct {
 	obj_t Socket;
 	obj_t af_inet;
 	obj_t bindc;
 	obj_t connectc;
 	obj_t newc_protoc;
+	obj_t recvc;
 	obj_t sendc;
 	obj_t sock_dgram;
 	obj_t sock_stream;
-	obj_t recvc;
     } str;
+    struct {
+	obj_t socket;
+    } cl;
 } socket_consts;
 
 
@@ -56,12 +56,10 @@ inst_free_socket(obj_t cl, obj_t inst)
 void
 cm_socket_new(unsigned argc, obj_t args)
 {
-    obj_t recvr, af, proto;
+    obj_t af, proto;
     int   fd;
     
     if (argc != 3)  error(ERR_NUM_ARGS);
-    recvr = CAR(args);
-    if (!is_kind_of(recvr, socket_consts.cl.socket))  error(ERR_INVALID_ARG, recvr);
     args = CDR(args);  af = CAR(args);
     if (!is_kind_of(af, consts.cl.integer))  error(ERR_INVALID_ARG, af);
     args = CDR(args);  proto = CAR(args);
@@ -154,20 +152,20 @@ cm_socket_recv(unsigned argc, obj_t args)
 
 const struct init_str socket_init_str_tbl[] = {
     { &socket_consts.str.Socket,      "Socket" },
+    { &socket_consts.str.af_inet,     "#AF_INET" },
     { &socket_consts.str.bindc,       "bind:" },
     { &socket_consts.str.connectc,    "connect:" },
-    { &socket_consts.str.sendc,       "send:" },
-    { &socket_consts.str.recvc,       "recv:" },
     { &socket_consts.str.newc_protoc, "new:proto:" },
-    { &socket_consts.str.af_inet,     "#AF_INET" },
+    { &socket_consts.str.recvc,       "recv:" },
+    { &socket_consts.str.sendc,       "send:" },
     { &socket_consts.str.sock_dgram,  "#SOCK_DGRAM" },
     { &socket_consts.str.sock_stream, "#SOCK_STREAM" }
 };
 
 const struct init_cl socket_init_cl_tbl[] = {
     { &socket_consts.cl.socket,
-      &consts.cl.object,
       &socket_consts.str.Socket,
+      &consts.cl.object,
       sizeof(struct inst_socket),
       inst_init_socket,
       inst_walk_socket,
@@ -192,20 +190,16 @@ socket_module_init(void)
 {
   vm_push(0);
 
-  init_strs((const struct init_str *) &socket_init_str_tbl,
-	    ARRAY_SIZE(socket_init_str_tbl)
-	    );
+  MODULE(module_cur)->consts  = (obj_t *) &socket_consts;
+  MODULE(module_cur)->nconsts = sizeof(socket_consts) / sizeof(obj_t);
+
+  init_strs(socket_init_str_tbl, ARRAY_SIZE(socket_init_str_tbl));
   
-  init_cls((const struct init_cl *) &socket_init_cl_tbl,
-	   ARRAY_SIZE(socket_init_cl_tbl)
-	   );
+  init_cls(socket_init_cl_tbl, ARRAY_SIZE(socket_init_cl_tbl));
   
-  init_cl_methods((const struct init_method *) &socket_init_cl_method_tbl,
-		  ARRAY_SIZE(socket_init_cl_method_tbl)
-		  );
-  init_inst_methods((const struct init_method *) &socket_init_inst_method_tbl,
-		    ARRAY_SIZE(socket_init_inst_method_tbl)
-		    );
+  init_cl_methods(socket_init_cl_method_tbl, ARRAY_SIZE(socket_init_cl_method_tbl));
+
+  init_inst_methods(socket_init_inst_method_tbl, ARRAY_SIZE(socket_init_inst_method_tbl));
   
   m_integer_new(AF_INET);
   env_new_put(socket_consts.str.af_inet, R0);
@@ -213,13 +207,6 @@ socket_module_init(void)
   env_new_put(socket_consts.str.sock_dgram, R0);
   m_integer_new(SOCK_STREAM);
   env_new_put(socket_consts.str.sock_stream, R0);
-  
-  /* TODO: Free everything instead, and rely on entry in environment?
-     Maybe simpler than deleting from root set at unload...
-  */
-  root_add(&socket_consts.hdr,
-	   (sizeof(socket_consts) - sizeof(socket_consts.hdr)) / sizeof(obj_t)
-	   );
   
   vm_pop(0);
 }

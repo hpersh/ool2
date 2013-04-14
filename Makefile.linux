@@ -2,8 +2,7 @@ CFLAGS	= -g -DDEBUG
 #CFLAGS  = -O2
 CC      = gcc $(CFLAGS)
 
-#all: ool socket.so math.so
-all: ool
+all: ool socket.so
 
 ool: scanner.l scanner.h grammar.y ool.c ool.h
 	bison -d grammar.y
@@ -15,7 +14,8 @@ ool: scanner.l scanner.h grammar.y ool.c ool.h
 	./ool test
 
 socket.so: socket.c
-	$(CC) -fPIC -shared -c -o socket.so socket.c
+	$(CC) -fPIC -c socket.c
+	$(CC) -shared -Wl,-soname,math.so -o socket.so socket.o
 
 math.so: math.c
 	$(CC) -fPIC -c math.c

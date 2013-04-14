@@ -50,7 +50,14 @@ struct inst_metaclass {
   void       (*inst_free)(obj_t cl, obj_t inst);
 };
 #define CLASS(x)    ((struct inst_metaclass *)(x))
-void m_class_new(obj_t name, obj_t parent, obj_t module);
+void m_class_new(obj_t    name,
+		 obj_t    parent,
+		 obj_t    module, 
+		 unsigned inst_size,
+		 void     (*inst_init)(obj_t cl, obj_t inst, va_list ap),
+		 void     (*inst_walk)(obj_t cl, obj_t inst, void (*func)(obj_t)),
+		 void     (*inst_free)(obj_t cl, obj_t inst)
+		 );
 void inst_walk_metaclass(obj_t inst, void (*func)(obj_t));
 unsigned is_subclass_of(obj_t cl1, obj_t cl2);
 void m_fqclname(obj_t cl);
@@ -167,11 +174,11 @@ struct inst_module {
   struct inst_dict base[1];
   obj_t            name, parent;
   void             *dl_cookie;	/* Cookie from dl_open() */
-  obj_t            *root_consts;
-  unsigned         root_nconsts;
+  obj_t            *consts;
+  unsigned         nconsts;
 };
 #define MODULE(x)  ((struct inst_module *)(x))
-void m_module_new(obj_t name, obj_t parent, obj_t *root_consts, unsigned root_nconsts);
+void m_module_new(obj_t name, obj_t parent);
 void m_fqmodname(obj_t mod);
 
 obj_t env_at(obj_t s);
@@ -331,12 +338,20 @@ struct init_cl {
   void     (*cl_init)(void);
 };
 
+void init_cls(const struct init_cl *tbl, unsigned n);
+
 struct init_str {
   obj_t *obj;
   char  *str;
 };
 
+void init_strs(const struct init_str *tbl, unsigned n);
+
 struct init_method {
   obj_t *cl, *sel;
   void  (*func)(unsigned, obj_t);
 };
+
+void init_cl_methods(const struct init_method *tbl, unsigned n);
+void init_inst_methods(const struct init_method *tbl, unsigned n);
+
