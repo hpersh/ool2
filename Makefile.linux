@@ -2,7 +2,7 @@ CFLAGS	= -g -DDEBUG
 #CFLAGS  = -O2
 CC      = gcc $(CFLAGS)
 
-all: ool socket.so
+all: ool socket.so math.so
 
 ool: scanner.l scanner.h grammar.y ool.c ool.h
 	bison -d grammar.y
