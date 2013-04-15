@@ -44,12 +44,6 @@ const struct init_str math_init_str_tbl[] = {
     { &math_consts.str.exp, "exp" }
 };
 
-const struct init_cl math_init_cl_tbl[] = {
-};
-
-const struct init_method math_init_cl_method_tbl[] = {
-};
-
 const struct init_method math_init_inst_method_tbl[] = {
     { &consts.cl._float, &math_consts.str.sin, cm_float_sin },
     { &consts.cl._float, &math_consts.str.cos, cm_float_cos },
@@ -66,9 +60,6 @@ math_module_init(void)
   
   init_strs(math_init_str_tbl, ARRAY_SIZE(math_init_str_tbl));
   
-  init_cls(math_init_cl_tbl, ARRAY_SIZE(math_init_cl_tbl));
-  
-  init_cl_methods(math_init_cl_method_tbl, ARRAY_SIZE(math_init_cl_method_tbl));
   init_inst_methods(math_init_inst_method_tbl, ARRAY_SIZE(math_init_inst_method_tbl));
   
   vm_pop(0);
@@ -78,5 +69,12 @@ math_module_init(void)
 void
 math_module_fini(void)
 {
+  unsigned i;
+
+  for (i = 0; i < ARRAY_SIZE(math_init_inst_method_tbl); ++i) {
+    dict_del(CLASS(*math_init_inst_method_tbl[i].cl)->inst_methods, 
+	     *math_init_inst_method_tbl[i].sel
+	     );
+  }
 }
 
