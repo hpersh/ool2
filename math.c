@@ -72,9 +72,18 @@ math_module_fini(void)
   unsigned i;
 
   for (i = 0; i < ARRAY_SIZE(math_init_inst_method_tbl); ++i) {
-    dict_del(CLASS(*math_init_inst_method_tbl[i].cl)->inst_methods, 
-	     *math_init_inst_method_tbl[i].sel
-	     );
+    obj_t dict = CLASS(*math_init_inst_method_tbl[i].cl)->inst_methods;
+    obj_t sel  = *math_init_inst_method_tbl[i].sel;
+    obj_t p, q;
+
+    if (p = dict_at(dict, sel)) {
+      q = CDR(p);
+      if (is_kind_of(q, consts.cl.code_method)
+	  && CODE_METHOD(q)->func == math_init_inst_method_tbl[i].func
+	  ) {
+	dict_del(dict, sel);
+      }
+    }
   }
 }
 
