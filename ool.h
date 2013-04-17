@@ -270,7 +270,7 @@ struct {
     obj_t car, cdr, chr, class_methods, class_variables, _continue;
     obj_t delc, divc;
     obj_t eof, equalsc, eval, evalc, exit, exitc;
-    obj_t _false, filterc, foreachc;
+    obj_t _false, filterc, flush, foreachc;
     obj_t gec, gtc;
     obj_t hash;
     obj_t ifc, ifc_elsec, indexc, instance_methods, instance_variables, instance_of;

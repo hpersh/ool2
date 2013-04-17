@@ -4509,6 +4509,20 @@ cm_file_write(unsigned argc, obj_t args)
 }
 
 void
+cm_file_flush(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 1)  error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl.file))  error(ERR_INVALID_ARG, recvr);
+
+  fflush(_FILE(recvr)->fp);
+
+  vm_assign(0, recvr);
+}
+
+void
 cm_file_eof(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -5366,6 +5380,7 @@ const struct init_str init_str_tbl[] = {
     { &consts.str.exitc,       "exit:" },
     { &consts.str._false,       "#false" },
     { &consts.str.filterc,     "filter:" },
+    { &consts.str.flush,       "flush" },
     { &consts.str.foreachc,    "foreach:" },
     { &consts.str.gec,         "ge:" },
     { &consts.str.gtc,         "gt:" },
@@ -5606,6 +5621,7 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.file, &consts.str.readc,    cm_file_read },
   { &consts.cl.file, &consts.str.readln,   cm_file_readln },
   { &consts.cl.file, &consts.str.writec,   cm_file_write },
+  { &consts.cl.file, &consts.str.flush,    cm_file_flush },
   { &consts.cl.file, &consts.str.eof,      cm_file_eof },
   { &consts.cl.file, &consts.str.load,     cm_file_load }
 };
