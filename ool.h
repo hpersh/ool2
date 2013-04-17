@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <assert.h>
 
 #undef  PTR_64_BITS
 
@@ -39,6 +40,9 @@ struct obj {
 
 obj_t inst_of(obj_t obj);
 unsigned is_kind_of(obj_t obj, obj_t cl);
+void _obj_assign(obj_t *dst, obj_t src);
+obj_t obj_retain(obj_t obj);
+#define OBJ_ASSIGN(dst, src)  (_obj_assign(&(dst), obj_retain(src)))
 
 struct inst_metaclass {
   struct obj base[1];
@@ -295,7 +299,7 @@ struct {
 } consts;
 
 enum {
-  FATAL_DOUBLE_ERR,
+  FATAL_DOUBLE_ERR = 1,
   FATAL_NO_MEM,
   FATAL_STACK_UNF,
 };
@@ -303,6 +307,7 @@ enum {
 void fatal(unsigned errcode);
 
 enum {
+  ERR_NONE,
   ERR_STACK_OVF,
   ERR_NUM_ARGS,
   ERR_INVALID_ARG,
@@ -321,10 +326,24 @@ enum {
   ERR_MODULE_OPEN_FAIL,
   ERR_WHILE,
   ERR_BLOCK,
-  ERR_ASSERT_FAIL
+  ERR_ASSERT_FAIL,
+  ERR_LAST = ERR_ASSERT_FAIL
 };
 
+unsigned err_lvl;
+
 void error(unsigned errcode, ...);
+
+enum {
+  FRAME_TYPE_RESTART,
+  FRAME_TYPE_INPUT,
+  FRAME_TYPE_MODULE,
+  FRAME_TYPE_WHILE,
+  FRAME_TYPE_BLOCK,
+  FRAME_TYPE_METHOD_CALL
+};
+
+void frame_jmp(unsigned type, int frame_jmp_code);
 
 void inst_init_parent(obj_t cl, obj_t inst, va_list ap);
 void inst_walk_parent(obj_t cl, obj_t inst, void (*func)(obj_t));

@@ -73,7 +73,7 @@ TODO
 Bugs
 
 Features
-- Shared-object modules
+- Macros; perhaps {{<macro-name> <macro-arg-1> ... <macro-arg-N>}}
 
 Enhancements
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
@@ -87,3 +87,7 @@ Gotchas?
 
 Optimizations
 - Make m_xxx functions return a value, too
+
+Etc.
+- Finalize socket and math modules
+- Additional modules

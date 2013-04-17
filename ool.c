@@ -6,7 +6,6 @@
 #include <setjmp.h>
 #include <dlfcn.h>
 #include <errno.h>
-#include <assert.h>
 
 #include "ool.h"
 #include "scanner.h"
@@ -165,12 +164,7 @@ const unsigned crc32_tbl[] = {
 	0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
 };
 
-void
-_crc32_init(unsigned *r)
-{
-  *r = 0xffffffff;
-}
-#define CRC32_INIT(r)  (_crc32_init(&(r)))
+#define CRC32_INIT(r)  ((r) = 0xffffffff)
 
 unsigned
 _crc32(unsigned *r, void *buf, unsigned n)
@@ -188,6 +182,7 @@ _crc32(unsigned *r, void *buf, unsigned n)
 /***************************************************************************/
 
 const char * const fatal_msgs[] = {
+  "",
   "Double error",
   "Out of memory",
   "Stack underflow"
@@ -205,13 +200,14 @@ fatal(unsigned errcode)
 
 /***************************************************************************/
 
-unsigned initf;
+unsigned initf;			/* TRUE <=> Initialization in progress */
 
 void collect(void);
 
 void *
 _cmalloc(unsigned size)
 {
+  /* Counter and limit for allocations triggering collection */
   static unsigned alloc_lim = 100000, alloc_cnt;
 
   void *result = 0;
@@ -268,6 +264,17 @@ _cfree(unsigned size, void *ptr)
   free(ptr);
 }
 
+/* Object lists
+
+Objects are kept on the active list.
+Collection consists of:
+(1) zeroing reference counts for all objects in the active list,
+(2) walking all objects, starting from the root set,
+    moving all referenced objects from the ective to the
+    marked list,
+(3) freeing all objects left in the active list, and
+(4) swapping the acive and marked lists.
+*/
 struct list obj_list[2];
 unsigned obj_list_idx_active, obj_list_idx_marked = 1;
 #define OBJ_LIST_ACTIVE  (&obj_list[obj_list_idx_active])
@@ -283,6 +290,25 @@ obj_list_swap(void)
   obj_list_idx_marked = temp;
 }
 
+/* Functions to access the inst_init, inst_walk and inst_free
+   functions associated with classes.
+
+The idea is that each class has 3 functions for handling instances:
+- inst_init, which takes a varargs argument list pointer to parameters
+  for initializing an instance,
+- inst_walkm which takes a pointer to a function to be run on
+  each object the given instance refers to, and
+- inst_free, which frees any non-object resources associated with
+  the instance.
+
+Each of these functions should end in a call to the respective function
+for the parent class.
+*/
+
+/* Call the class' instance initialization function for the given
+   instance
+*/
+
 void
 inst_init(obj_t inst, ...)
 {
@@ -294,6 +320,8 @@ inst_init(obj_t inst, ...)
   va_end(ap);
 }
 
+/* Call the parent class' instance initialization function */
+
 void
 inst_init_parent(obj_t cl, obj_t inst, va_list ap)
 {
@@ -301,6 +329,8 @@ inst_init_parent(obj_t cl, obj_t inst, va_list ap)
 
   (*CLASS(parent)->inst_init)(parent, inst, ap);
 }
+
+/* Call the class' instance walk function for the given instance */
 
 void
 inst_walk(obj_t inst, void (*func)(obj_t))
@@ -316,6 +346,8 @@ inst_walk(obj_t inst, void (*func)(obj_t))
   (*CLASS(cl)->inst_walk)(cl, inst, func);
 }
 
+/* Call the parent class' instance walk function */
+
 void
 inst_walk_parent(obj_t cl, obj_t inst, void (*func)(obj_t))
 {
@@ -323,6 +355,8 @@ inst_walk_parent(obj_t cl, obj_t inst, void (*func)(obj_t))
 
   (*CLASS(parent)->inst_walk)(parent, inst, func);
 }
+
+/* Call the class' instance free function for the given instance */
 
 void
 inst_free(obj_t inst)
@@ -332,6 +366,8 @@ inst_free(obj_t inst)
   (*CLASS(cl)->inst_free)(cl, inst);
 }
 
+/* Call the parent class' instance free function */
+
 void
 inst_free_parent(obj_t cl, obj_t inst)
 {
@@ -340,8 +376,11 @@ inst_free_parent(obj_t cl, obj_t inst)
   (*CLASS(parent)->inst_free)(parent, inst);
 }
 
-obj_t obj_retain(obj_t obj);
 void  obj_release(obj_t obj);
+
+/* Need to be careful in assigning object references...
+   need to handle the case of an idempotent assignment.
+*/
 
 void
 _obj_assign(obj_t *dst, obj_t src)
@@ -353,6 +392,10 @@ _obj_assign(obj_t *dst, obj_t src)
 }
 #define OBJ_ASSIGN(dst, src)  (_obj_assign(&(dst), obj_retain(src)))
 
+/* Allocate storage for an object, and hook it into the
+   active object list
+*/
+
 obj_t
 _obj_alloc(unsigned size)
 {
@@ -362,6 +405,8 @@ _obj_alloc(unsigned size)
 
   return (result);
 }
+
+/* Allocate storage for an instance of the given class */
 
 obj_t
 obj_alloc(obj_t cl)
@@ -373,15 +418,24 @@ obj_alloc(obj_t cl)
   return (result);
 }
 
+/* Free storage used by given object */
+
 void
 obj_free(obj_t obj)
 {
+  /* Call up the class hierarchy, to free any non-object
+     resources
+  */
   inst_free(obj);
-
+  
+  /* Remove from active object list */
   list_erase(obj->list_node);
 
+  /* The actual free */
   _cfree(CLASS(inst_of(obj))->inst_size, obj);
 }
+
+/* Bump the given object's reference count */
 
 obj_t
 obj_retain(obj_t obj)
@@ -395,6 +449,10 @@ obj_retain(obj_t obj)
   return (obj);
 }
 
+/* Decrement the given object's reference count; 
+   if the reference count goes to 0, free the object
+*/
+
 void
 obj_release(obj_t obj)
 {
@@ -403,25 +461,36 @@ obj_release(obj_t obj)
       || --obj->ref_cnt != 0
       )  return;
 
+  /* Call up the class hierarchy, to release all objects referenced
+     by this one
+  */
   inst_walk(obj, obj_release);
 
   obj_free(obj);
 }
+
+/* Mark the given object, for garbage collection  */
 
 void
 obj_mark(obj_t obj)
 {
   if (obj == NIL)  return;
 
+  /* Bump its reference count */
   obj_retain(obj);
 
+  /* If marked before, done */
   if (obj->ref_cnt > 1)  return;
 
+  /* Marked for first time => add it to the marked list ... */
   list_erase(obj->list_node);
   list_insert(obj->list_node, LIST_END(OBJ_LIST_MARKED));
 
+  /* ... and mark everything this object refers to */
   inst_walk(obj, obj_mark);
 }
+
+/* Walk all objects referred to by the root set */
 
 void
 root_walk(void (*func)(obj_t))
@@ -429,10 +498,18 @@ root_walk(void (*func)(obj_t))
   obj_t    *q;
   unsigned n;
 
+  /* All VM registers */
+
   for (q = regs, n = ARRAY_SIZE(regs); n; --n, ++q)  (*func)(*q);
+
+  /* Everything on the VM stack */
   for (q = sp; q < stack_end; ++q)  (*func)(*q);
+
+  /* The main module */
   (*func)(module_main);
 }
+
+/* Perform garbage collection */
 
 void
 collect(void)
@@ -582,15 +659,6 @@ vm_dropn(unsigned n)
 }
 
 /***************************************************************************/
-
-enum {
-  FRAME_TYPE_RESTART,
-  FRAME_TYPE_INPUT,
-  FRAME_TYPE_MODULE,
-  FRAME_TYPE_WHILE,
-  FRAME_TYPE_BLOCK,
-  FRAME_TYPE_METHOD_CALL
-};
 
 struct frame {
   struct frame *prev;
@@ -4953,13 +5021,11 @@ bt_print(obj_t outf)
 void
 error(unsigned errcode, ...)
 {
-  static unsigned lvl;
-
   obj_t   outf;
   FILE    *fp;
   va_list ap;
 
-  if (++lvl > 1)  fatal(FATAL_DOUBLE_ERR);
+  if (++err_lvl > 1)  fatal(FATAL_DOUBLE_ERR);
 
   m_file_stderr();
   outf = R0;
@@ -5106,7 +5172,7 @@ error(unsigned errcode, ...)
 
   va_end(ap);
   
-  --lvl;
+  --err_lvl;
 
   frame_jmp(FRAME_TYPE_RESTART, 1);
 
