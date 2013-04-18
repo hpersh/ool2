@@ -71,6 +71,19 @@ For more examples, see the module "point.ool".
 TODO
 
 Bugs
+- Runaway memory usage; after 10,000,000 loops, stats are:
+ok stats.vm.stack_depth = 0
+stats.vm.stack_depth_max = 53
+stats.mem.alloc_cnt = 520000967
+stats.mem.alloc_lim = 100000
+stats.mem.bytes_alloced = 2759011741
+stats.mem.free_cnt = 520000074
+stats.mem.bytes_freed = 2278955758
+stats.mem.bytes_in_use = 480055983
+stats.mem.bytes_in_use_max = 480057910
+stats.mem.collect_cnt = 5202
+stats.mem.collected_cnt = 0
+stats.mem.bytes_collected = 0
 
 Features
 - Macros; perhaps {{<macro-name> <macro-arg-1> ... <macro-arg-N>}}
