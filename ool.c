@@ -541,7 +541,7 @@ collect(void)
     
 #ifndef NDEBUG
     ++stats.mem.collected_cnt;
-    stats.mem.bytes_collected = CLASS(inst_of(r))->inst_size;
+    stats.mem.bytes_collected += CLASS(inst_of(r))->inst_size;
 #endif
 
     obj_free(r);
@@ -3827,8 +3827,10 @@ cm_block_tostring(unsigned argc, obj_t args)
 void
 inst_init_array(obj_t cl, obj_t inst, va_list ap)
 {
-  ARRAY(inst)->size = va_arg(ap, unsigned);
-  ARRAY(inst)->data = _zcmalloc(ARRAY(inst)->size * sizeof(obj_t));
+  unsigned size = va_arg(ap, unsigned);
+
+  ARRAY(inst)->data = _zcmalloc(size * sizeof(obj_t));
+  ARRAY(inst)->size = size;
 
   inst_init_parent(cl, inst, ap);
 }
