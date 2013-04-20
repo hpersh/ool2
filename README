@@ -76,6 +76,14 @@ Features
 - Macros; perhaps {{<macro-name> <macro-arg-1> ... <macro-arg-N>}}
 
 Enhancements
+- Blocks with no arguments; evalled as a sequence of exprs by "eval"
+- Unevaluated functions arguments
+  - Maybe {{(x) ... }}
+  - Example: [while [i lt: 10] {[i print] [i = [i add: 1]]}]
+    - Block without args, i.e. initial list is evalled as sequence of exprs
+      - Or, {a b c | ... } => Block with args
+            { ... } => Block with no args
+    - "while" is symbol defined in main module 
 - Use readline for interactive input
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
   white space terminates it, and subunits (which can be arbitrary characters, i.e. arbitrary expressions)
