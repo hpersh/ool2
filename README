@@ -96,6 +96,9 @@ Gotchas?
 
 Optimizations
 - Make m_xxx functions return a value, too
+- Better internal representations
+  - Method calls: don't have to collect selector and args with every eval
+  - Blocks: separate args and body
 
 Etc.
 - Finalize socket and math modules
