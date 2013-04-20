@@ -1,5 +1,5 @@
 CFLAGS	= -g -DDEBUG
-#CFLAGS  = -O2
+#CFLAGS  = -O3 -fomit-frame-pointer
 CC      = gcc $(CFLAGS)
 
 all: ool socket.so math.so process.so

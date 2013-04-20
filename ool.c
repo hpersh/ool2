@@ -43,12 +43,12 @@ struct {
   } vm;
   struct {
     unsigned alloc_cnt;
-    unsigned alloc_lim;
     unsigned bytes_alloced;
     unsigned free_cnt;
     unsigned bytes_freed;
     unsigned bytes_in_use;
     unsigned bytes_in_use_max;
+    unsigned bytes_in_use_collect;
     unsigned collect_cnt;
     unsigned collected_cnt;
     unsigned bytes_collected;
@@ -63,12 +63,12 @@ stats_print(void)
   PRINT_STAT(stats.vm.stack_depth);
   PRINT_STAT(stats.vm.stack_depth_max);
   PRINT_STAT(stats.mem.alloc_cnt);
-  PRINT_STAT(stats.mem.alloc_lim);
   PRINT_STAT(stats.mem.bytes_alloced);
   PRINT_STAT(stats.mem.free_cnt);
   PRINT_STAT(stats.mem.bytes_freed);
   PRINT_STAT(stats.mem.bytes_in_use);
   PRINT_STAT(stats.mem.bytes_in_use_max);
+  PRINT_STAT(stats.mem.bytes_in_use_collect);
   PRINT_STAT(stats.mem.collect_cnt);
   PRINT_STAT(stats.mem.collected_cnt);
   PRINT_STAT(stats.mem.bytes_collected);
@@ -207,19 +207,13 @@ void collect(void);
 void *
 _cmalloc(unsigned size)
 {
-  /* Counter and limit for allocations triggering collection */
-  static unsigned alloc_lim = 100000, alloc_cnt;
-
   void *result = 0;
 
   if (!initf) {
-    if (alloc_cnt < alloc_lim)  result = malloc(size);
+    result = malloc(size);
   
     if (result == 0) {
       collect();
-      
-      if (alloc_cnt < alloc_lim)  alloc_lim = alloc_cnt >> 1;
-      alloc_cnt = 0;
     }
   }
 
@@ -227,11 +221,8 @@ _cmalloc(unsigned size)
     if ((result = malloc(size)) == 0)  fatal(FATAL_NO_MEM);
   }
 
-  ++alloc_cnt;
-
 #ifndef NDEBUG
   ++stats.mem.alloc_cnt;
-  stats.mem.alloc_lim     = alloc_lim;
   stats.mem.bytes_alloced += size;
   stats.mem.bytes_in_use  += size;
   if (stats.mem.bytes_in_use > stats.mem.bytes_in_use_max) {
@@ -525,7 +516,7 @@ collect(void)
        p != e;
        p = LIST_NEXT(p)
        ) {
-    r = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node);
+    r = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node[0]);
 
 #ifndef NDEBUG
     ASSERT(r->ref_cnt != 0);
@@ -537,7 +528,7 @@ collect(void)
   root_walk(obj_mark);
 
   for (e = LIST_END(OBJ_LIST_ACTIVE); (p = LIST_FIRST(OBJ_LIST_ACTIVE)) != e; ) {
-    r = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node);
+    r = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node[0]);
     
 #ifndef NDEBUG
     ++stats.mem.collected_cnt;
@@ -549,6 +540,37 @@ collect(void)
   
   obj_list_swap();
 }
+
+#ifndef NDEBUG
+
+void
+mem_dump(void)
+{
+  unsigned    n, bytes;
+  struct list *e, *p;
+
+  for (bytes = n = 0, e = LIST_END(OBJ_LIST_ACTIVE), p = LIST_FIRST(OBJ_LIST_ACTIVE); p != e; p = LIST_NEXT(p)) {
+    obj_t    q = FIELD_PTR_TO_STRUCT_PTR(p, struct obj, list_node[0]), r = inst_of(q);
+    char     *s;
+    unsigned i;
+
+    if (r) {
+      s = STRING(CLASS(r)->name)->data;
+      i = CLASS(r)->inst_size;
+    } else {
+      s = "#Metaclass";
+      i = sizeof(struct inst_metaclass);
+    }
+
+    printf("obj=%p\tref_cnt=%u\tinst_of=%s\tbytes=%u\n", q, q->ref_cnt, s, i);
+    ++n;
+    bytes += i;
+  }
+  printf("Number of objects: %u\n", n);
+  printf("Bytes used: %u\n", bytes);
+}
+
+#endif
 
 /***************************************************************************/
 
@@ -3851,7 +3873,7 @@ inst_walk_array(obj_t cl, obj_t inst, void (*func)(obj_t))
 void
 inst_free_array(obj_t cl, obj_t inst)
 {
-  _cfree(ARRAY(inst)->size, ARRAY(inst)->data);
+  _cfree(ARRAY(inst)->size * sizeof(obj_t), ARRAY(inst)->data);
 
   inst_free_parent(cl, inst);
 }
@@ -4093,7 +4115,7 @@ dict_at_put(obj_t dict, obj_t key, obj_t val)
 	&& string_len(key) > 0
 	&& STRING(key)->data[0] == '#'
 	) {
-      error(ERR_CONST);
+      error(ERR_CONST, key);
     }
     
     OBJ_ASSIGN(CDR(CAR(p)), val);
@@ -4902,6 +4924,8 @@ env_at_put(obj_t s, obj_t val)
   env_find(s, &dn_found, &dict_top);
 
   if (dn_found) {
+    if (STRING(s)->data[0] == '#')  error(ERR_CONST, s);
+
     OBJ_ASSIGN(CDR(dn_found), val);
   } else {
     dict_at_put(dict_top, s, val);

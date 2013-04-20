@@ -99,7 +99,6 @@ struct inst_float {
   float_val_t val;
 };
 #define FLOAT(x)  ((struct inst_float *)(x))
-typedef long double float_val_t;
 #define FLOAT_SCANF_FMT  "%Lf"
 #define FLOAT_PRINTF_FMT  "%Lg"
 void m_float_new(float_val_t val);
