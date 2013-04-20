@@ -99,6 +99,11 @@ Optimizations
 - Better internal representations
   - Method calls: don't have to collect selector and args with every eval
   - Blocks: separate args and body
+- Memory management
+  - Keep freed blocks in lists ordered by size, for re-use
+  - Instead of freeing instances (objects), keep a list of free instances
+    linked off the class; garbage collection frees them first
+    - How deal with objs with additional storage, eg. strings, arrays?
 
 Etc.
 - Finalize socket and math modules
