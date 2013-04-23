@@ -111,13 +111,13 @@ DSYM		({SYM}|{CSYM})("."({SYM}|{CSYM}))+
 
 {CSYM}				{ return (TOK_CSYM); }
 
-{SYM}				{ return (TOK_SYM); }
+"&"?{SYM}			{ return (TOK_SYM); }
 
 {DSYM}				{ return (TOK_DSYM); }
 
 {DQUOTE}({EDQUOTE}|{NDQUOTE})*{DQUOTE}        { return (TOK_QSTR); }
 
-{ALPHA}({ALPHA}|{DECDIGIT})*":"       { return (TOK_SELN); }
+"&"?{ALPHA}({ALPHA}|{DECDIGIT})*":"       { return (TOK_SELN); }
 
 [ \t\r]       /* Skip whitespace */
 

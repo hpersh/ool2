@@ -127,11 +127,12 @@ unsigned list_len(obj_t li);
 
 struct inst_method_call {
   struct obj base[1];
-  obj_t      list;
+  obj_t      sel;
+  unsigned   argc;
+  obj_t      args;
 };
 #define METHOD_CALL(x)  ((struct inst_method_call *)(x))
-void m_method_call_new(obj_t list);
-void _method_call_concat(obj_t mc, obj_t el);
+void m_method_call_new(obj_t sel, obj_t args);
 
 struct inst_block {
   struct obj base[1];
@@ -264,7 +265,7 @@ struct {
     obj_t pair;
     obj_t string;
     obj_t system;
-    obj_t addc, andc, appendc, asc, atc, atc_lengthc, atc_putc;
+    obj_t addc, aifc, aifc_elsec, andc, appendc, aquote, asc, atc, atc_lengthc, atc_putc, awhilec;
     obj_t _break;
     obj_t car, cdr, chr, class_methods, class_variables, _continue;
     obj_t delc, divc;
@@ -272,18 +273,17 @@ struct {
     obj_t _false, filterc, flush, foreachc;
     obj_t gec, gtc;
     obj_t hash;
-    obj_t ifc, ifc_elsec, indexc, instance_methods, instance_variables, instance_of;
+    obj_t indexc, instance_methods, instance_variables, instance_of;
     obj_t keys;
     obj_t lec, length, load, ltc;
     obj_t main, mapc, minus, mode, modc, multc;
     obj_t name, new, newc, newc_modec, newc_parentc_instance_variablesc, newc_putc, nil, not;
     obj_t orc;
     obj_t parent, path, pquote, print, printc;
-    obj_t quote;
     obj_t range, rangec, rangec_stepc, readc, readln, reducec_initc, _return, rindexc;
     obj_t _stderr, _stdin, _stdout, splicec, splitc, subc;
     obj_t tostring, tostringc, _true;
-    obj_t whilec, writec;
+    obj_t writec;
     obj_t xorc;
 #ifndef NDEBUG
     obj_t assert;
