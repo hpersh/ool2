@@ -487,8 +487,7 @@ block_body:
 block:
         TOK_LBRACE block_args block_body TOK_RBRACE
 {
-  m_cons($2, $3);
-  m_block_new(R0);
+  m_block_new($2, $3);
   
   vm_push(0);
   $$ = R0;

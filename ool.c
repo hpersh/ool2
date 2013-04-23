@@ -3722,7 +3722,9 @@ cm_method_call_tostring(unsigned argc, obj_t args)
 void
 inst_init_block(obj_t cl, obj_t inst, va_list ap)
 {
-  OBJ_ASSIGN(BLOCK(inst)->list, va_arg(ap, obj_t));
+  OBJ_ASSIGN(BLOCK(inst)->args, va_arg(ap, obj_t));
+  OBJ_ASSIGN(BLOCK(inst)->body, va_arg(ap, obj_t));
+  BLOCK(inst)->argc = list_len(BLOCK(inst)->args);
 
   inst_init_parent(cl, inst, ap);
 }
@@ -3730,7 +3732,8 @@ inst_init_block(obj_t cl, obj_t inst, va_list ap)
 void
 inst_walk_block(obj_t cl, obj_t inst, void (*func)(obj_t))
 {
-  (*func)(BLOCK(inst)->list);
+  (*func)(BLOCK(inst)->args);
+  (*func)(BLOCK(inst)->body);
 
   inst_walk_parent(cl, inst, func);
 }
@@ -3742,55 +3745,50 @@ inst_free_block(obj_t cl, obj_t inst)
 }
 
 void
-m_block_new(obj_t li)
+m_block_new(obj_t args, obj_t body)
 {
   vm_push(0);
 
   vm_inst_alloc(consts.cl.block);
-  inst_init(R0, li);
+  inst_init(R0, args, body);
 
   vm_drop();
 }
 
 void
-cm_block_new(unsigned argc, obj_t args)
-{
-  obj_t arg;
-
-  if (argc != 2)  error(ERR_NUM_ARGS);
-  arg = CAR(CDR(args));
-  if (!is_kind_of(arg, consts.cl.list))  error(ERR_INVALID_ARG);
-
-  m_block_new(arg);
-}
-
-void
 cm_block_eval(unsigned argc, obj_t args)
 {
-  obj_t recvr, arg, li, p;
+  obj_t recvr, arg, p;
 
-  if (argc != 2)                            error(ERR_NUM_ARGS);
+  if (argc < 1 || argc > 2)                 error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.block))  error(ERR_INVALID_ARG);
-  li = BLOCK(recvr)->list;
-  if (li == NIL)                            error(ERR_BAD_FORM, recvr);
-  p = CAR(li);
-  if (!(p == NIL || is_kind_of(p, consts.cl.list)))      error(ERR_BAD_FORM, recvr);
-  arg = CAR(CDR(args));
-  if (!(arg == NIL || is_kind_of(arg, consts.cl.list)))  error(ERR_INVALID_ARG);
-  if (list_len(p) != list_len(arg))         error(ERR_NUM_ARGS);
+  if (argc == 2) {
+    arg = CAR(CDR(args));
+    if (list_len(arg) != BLOCK(recvr)->argc)  error(ERR_NUM_ARGS);
 
-  m_string_dict_new(16);
-  for ( ; p; p = CDR(p), arg = CDR(arg)) {
-    dict_at_put(R0, CAR(p), CAR(arg));
+    m_string_dict_new(16);
+    for (p = BLOCK(recvr)->args; p; p = CDR(p), arg = CDR(arg)) {
+      dict_at_put(R0, CAR(p), CAR(arg));
+    }
+
+  } else {
+    if (BLOCK(recvr)->argc > 0) {
+      vm_assign(0, recvr);
+
+      return;
+    }
+
+    m_string_dict_new(16);
   }
+
   vm_push(0);
   
   FRAME_BLOCK_BEGIN(R0) {
 
     if (frame_jmp_code == 0) {
       vm_assign(0, NIL);
-      for (p = CDR(li); p; p = CDR(p)) {
+      for (p = BLOCK(recvr)->body; p; p = CDR(p)) {
 	m_method_call_1(consts.str.eval, CAR(p));
       }
     }
@@ -3809,7 +3807,8 @@ cm_block_tostring(unsigned argc, obj_t args)
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.block))  error(ERR_INVALID_ARG, recvr);
 
-  m_list_tostr(BLOCK(recvr)->list, "{}");
+  m_cons(BLOCK(recvr)->args, BLOCK(recvr)->body);
+  m_list_tostr(R0, "{}");
 }
 
 /***************************************************************************/
@@ -5591,6 +5590,7 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.method_call, &consts.str.tostring, cm_method_call_tostring },
   { &consts.cl.method_call, &consts.str.eval,     cm_method_call_eval },
 
+  { &consts.cl.block, &consts.str.eval,     cm_block_eval },
   { &consts.cl.block, &consts.str.evalc,    cm_block_eval },
   { &consts.cl.block, &consts.str.tostring, cm_block_tostring },
 

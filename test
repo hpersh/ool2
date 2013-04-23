@@ -96,10 +96,10 @@
 [[foo equals: 77] assert]  // Test at:put:
 [foo = [66 add: 33]]  // Test assign shorthand
 [[foo equals: 99] assert]
-[{() [[foo equals: 99] assert]} eval: ()]  // Test access to parent env
-[{() [foo = 66]} eval: ()]
+[{() [foo equals: 99]} assert]  // Test access to parent env
+{() [foo = 66]}
 [[foo equals: 66] assert]  // Test access to parent env
-[{() [foo := 55] [[foo equals: 55] assert]} eval: ()]
+{() [foo := 55] [[foo equals: 55] assert]}
 [[foo equals: 66] assert]  // Test new
 
 // Test #File

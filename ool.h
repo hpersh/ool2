@@ -136,10 +136,12 @@ void m_method_call_new(obj_t sel, obj_t args);
 
 struct inst_block {
   struct obj base[1];
-  obj_t      list;
+  unsigned   argc;
+  obj_t      args;
+  obj_t      body;
 };
 #define BLOCK(x)  ((struct inst_block *)(x))
-void m_block_new(obj_t list);
+void m_block_new(obj_t args, obj_t body);
 
 struct inst_array {
   struct obj base[1];

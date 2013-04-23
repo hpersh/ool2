@@ -76,7 +76,6 @@ Features
 - Macros; perhaps {{<macro-name> <macro-arg-1> ... <macro-arg-N>}}
 
 Enhancements
-- Blocks with no arguments; evalled as a sequence of exprs by "eval"
 - Use readline for interactive input
 - Perhaps generalization of dotted-string?  @xxx.yyy.zzz, where '@' introduces string,
   white space terminates it, and subunits (which can be arbitrary characters, i.e. arbitrary expressions)
@@ -89,8 +88,6 @@ Gotchas?
 
 Optimizations
 - Make m_xxx functions return a value, too
-- Better internal representations
-  - Blocks: separate args and body
 - Memory management
   - Keep freed blocks in lists ordered by size, for re-use
   - Instead of freeing instances (objects), keep a list of free instances
