@@ -5,6 +5,8 @@
 // Test #Object
 [['sam equals: "sam"]                 assert]  // Test quoting
 [[['sam instance-of] equals: #String] assert]  // Test instance-of, equals:
+[[[#true &if: "foo" else: "bar"] equals: "foo"]         assert]  // Test if
+[[[[1 equals: 2] &if: "foo" else: "bar"] equals: "bar"] assert]  // Test if
 #Object  // Test tostring, print
 
 // Test #Metaclass
@@ -18,9 +20,7 @@
 [[[[[#Integer.instance-methods at: "add:"] cdr] eval: (1 2)] equals: 3] assert]  // Test eval
 
 // Test #Boolean
-[[[[1 equals: 1] tostring] equals: "#true"]              assert]  // Test tostring
-[[[#true if: '"foo" else: '"bar"] equals: "foo"]         assert]  // Test if
-[[[[1 equals: 2] if: '"foo" else: '"bar"] equals: "bar"] assert]  // Test if
+[[[[1 equals: 1] tostring] equals: "#true"]             assert]  // Test tostring
 
 // Test #Integer
 [[[#Integer new] equals: 0]                     assert]  // Test new

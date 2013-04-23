@@ -1472,6 +1472,39 @@ cm_object_at_put(unsigned argc, obj_t args)
   vm_assign(0, val);
 }
 
+void
+cm_object_if(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+  
+  if (argc != 2)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  m_method_call_1(consts.str.eval, recvr);
+  if (!is_kind_of(R0, consts.cl.boolean))     error(ERR_INVALID_ARG, recvr);
+  
+  if (BOOLEAN(R0)->val) {
+    m_method_call_1(consts.str.eval, CAR(CDR(args)));
+  } else {
+    vm_assign(0, R0);
+  }
+}
+
+void
+cm_object_if_else(unsigned argc, obj_t args)
+{
+  obj_t recvr;
+
+  if (argc != 3)                              error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  m_method_call_1(consts.str.eval, recvr);
+  if (!is_kind_of(R0, consts.cl.boolean))     error(ERR_INVALID_ARG, recvr);
+  args = CDR(args);
+  
+  m_method_call_1(consts.str.eval,
+		  BOOLEAN(R0)->val ? CAR(args) : CAR(CDR(args))
+		  );
+}
+
 enum { WHILE_CONT = 1, WHILE_BREAK };
 
 void
@@ -1722,37 +1755,6 @@ cm_boolean_equals(unsigned argc, obj_t args)
   m_boolean_new(inst_of(arg) == inst_of(recvr)
 		&& (BOOLEAN(arg)->val != 0) == (BOOLEAN(recvr)->val != 0)
 		);
-}
-
-void
-cm_boolean_if(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-  
-  if (argc != 2)                              error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
-  
-  if (BOOLEAN(recvr)->val) {
-    m_method_call_1(consts.str.eval, CAR(CDR(args)));
-  } else {
-    vm_assign(0, recvr);
-  }
-}
-
-void
-cm_boolean_if_else(unsigned argc, obj_t args)
-{
-  obj_t recvr;
-
-  if (argc != 3)                              error(ERR_NUM_ARGS);
-  recvr = CAR(args);
-  if (!is_kind_of(recvr, consts.cl.boolean))  error(ERR_INVALID_ARG, recvr);
-  args = CDR(args);
-  
-  m_method_call_1(consts.str.eval,
-		  BOOLEAN(recvr)->val ? CAR(args) : CAR(CDR(args))
-		  );
 }
 
 void
@@ -3614,7 +3616,9 @@ cm_list_reduce(unsigned argc, obj_t args)
 void
 inst_init_method_call(obj_t cl, obj_t inst, va_list ap)
 {
-  OBJ_ASSIGN(METHOD_CALL(inst)->list, va_arg(ap, obj_t));
+  OBJ_ASSIGN(METHOD_CALL(inst)->sel, va_arg(ap, obj_t));
+  OBJ_ASSIGN(METHOD_CALL(inst)->args, va_arg(ap, obj_t));
+  METHOD_CALL(inst)->argc = list_len(METHOD_CALL(inst)->args);
 
   inst_init_parent(cl, inst, ap);
 }
@@ -3622,7 +3626,8 @@ inst_init_method_call(obj_t cl, obj_t inst, va_list ap)
 void
 inst_walk_method_call(obj_t cl, obj_t inst, void (*func)(obj_t))
 {
-  (*func)(METHOD_CALL(inst)->list);
+  (*func)(METHOD_CALL(inst)->sel);
+  (*func)(METHOD_CALL(inst)->args);
 
   inst_walk_parent(cl, inst, func);
 }
@@ -3634,115 +3639,80 @@ inst_free_method_call(obj_t cl, obj_t inst)
 }
 
 void
-m_method_call_new(obj_t li)
+m_method_call_new(obj_t sel, obj_t args)
 {
   vm_push(0);
 
   vm_inst_alloc(consts.cl.method_call);
-  inst_init(R0, li);
+  inst_init(R0, sel, args);
 
   vm_drop();
 }
 
 void
-_method_call_concat(obj_t mc, obj_t el)
-{
-  _list_concat(&METHOD_CALL(mc)->list, el);
-}
-
-void
-cm_method_call_new(unsigned argc, obj_t args)
-{
-  obj_t arg;
-
-  if (argc != 2)                         error(ERR_NUM_ARGS);
-  arg = CAR(CDR(args));
-  if (!is_kind_of(arg, consts.cl.list))  error(ERR_INVALID_ARG, arg);
-
-  m_method_call_new(arg);
-}
-
-void
 cm_method_call_eval(unsigned argc, obj_t args)
 {
-  obj_t    recvr;
-  unsigned n, nargc, s, quotef = 0;
-  obj_t    li, p, *q;
-  char     *r;
+  obj_t recvr;
   
   if (argc != 1)                                  error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.method_call))  error(ERR_INVALID_ARG, recvr);
 
-  /* Scan to calculate length of selector and number of args */
-  
-  li = METHOD_CALL(recvr)->list;
-  for (s = 0, n = 0, p = li; p; p = CDR(p), ++n) {
-    if (n & 1) {
-      ASSERT(is_kind_of(CAR(p), consts.cl.string));
-
-      s += string_len(CAR(p));
-    }
+  if (STRING(METHOD_CALL(recvr)->sel)->data[0] == '&') {
+    vm_assign(0, METHOD_CALL(recvr)->args);
+  } else {
+    m_list_eval(METHOD_CALL(recvr)->args);
   }
-  ++s;
-  
-  /* Verify well-formedness, and check for quote */
 
-  if (n == 2) {
-    nargc = 1;
-    
-    quotef = string_equal(CAR(CDR(li)), consts.str.quote);
-  } else if (n >= 3) {
-    ASSERT((n & 1) == 1);
-    
-    nargc = 1 + (n >> 1);
-  } else  ASSERT(0);
+  FRAME_METHOD_CALL_BEGIN(METHOD_CALL(recvr)->sel, R0) {
 
-  /* Concatenate selector, and build arg list */
-
-  vm_pushm(1, 2);
-
-  vm_assign(1, NIL);
-  vm_inst_alloc(consts.cl.string);
-  inst_init(R0, s);
-  vm_assign(2, R0);
-  for (q = &R1, r = STRING(R2)->data, n = 0, p = li; p; p = CDR(p), ++n) {
-    if (n & 1) {
-      s = string_len(CAR(p));
-      memcpy(r, STRING(CAR(p))->data, s);
-      r += s;
-      continue;
-    }
-    
-    vm_assign(0, CAR(p));
-    if (!quotef)  m_method_call_1(consts.str.eval, R0);
-    m_cons(R0, NIL);
-    OBJ_ASSIGN(*q, R0);
-    q = &CDR(R0);
-  }
-  *r = 0;
-    
-  /* Call method */
-
-  FRAME_METHOD_CALL_BEGIN(R2, R1) {
-
-    m_method_call((struct frame_method_call *) frp, R2, nargc, R1);
+    m_method_call((struct frame_method_call *) frp,
+		  METHOD_CALL(recvr)->sel,
+		  METHOD_CALL(recvr)->argc,
+		  R0);
 
   } FRAME_METHOD_CALL_END;
-  
-  vm_popm(1, 2);
 }
 
 void
 cm_method_call_tostring(unsigned argc, obj_t args)
 {
-  obj_t recvr;
+  obj_t    recvr, p, *q;
+  char     *s, *t;
+  unsigned n, k;
 
   if (argc != 1)                                  error(ERR_NUM_ARGS);
   recvr = CAR(args);
   if (!is_kind_of(recvr, consts.cl.method_call))  error(ERR_INVALID_ARG, recvr);
 
-  m_list_tostr(METHOD_CALL(recvr)->list, "[]");
+  vm_push(1);
+
+  vm_assign(1, NIL);
+  for (n = 0, q = &R1, s = STRING(METHOD_CALL(recvr)->sel)->data, p = METHOD_CALL(recvr)->args; ; ++n) {
+    if (n & 1) {
+      t = index(s, ':');
+      k = t ? (unsigned)(t + 1 - s) : (unsigned) strlen(s);
+
+      m_string_new(1, k, s);
+      m_cons(R0, NIL);
+
+      s += k;
+    } else {
+      m_cons(CAR(p), NIL);
+      
+      p = CDR(p);
+    }
+
+    OBJ_ASSIGN(*q, R0);
+    q = &CDR(R0);
+
+    if (n > 0 && p == NIL)  break;
+  }
+  vm_assign(0, R1);
+
+  vm_pop(1);
+  
+  m_list_tostr(R0, "[]");
 }
 
 /***************************************************************************/
@@ -5383,12 +5353,16 @@ const struct init_str init_str_tbl[] = {
     { &consts.str.string,      "#String" },
     { &consts.str.system,      "#System" },
     { &consts.str.addc,        "add:" },
+    { &consts.str.aifc,        "&if:" },
+    { &consts.str.aifc_elsec,  "&if:else:" },
     { &consts.str.andc,        "and:" },
     { &consts.str.appendc,     "append:" },
+    { &consts.str.aquote,      "&quote" },
     { &consts.str.asc,         "asc" },
     { &consts.str.atc,         "at:" },
     { &consts.str.atc_lengthc, "at:length:" },
     { &consts.str.atc_putc,    "at:put:" },
+    { &consts.str.awhilec,     "&while:" },
     { &consts.str._break,      "break" },
     { &consts.str.car,         "car" },
     { &consts.str.cdr,         "cdr" },
@@ -5404,15 +5378,13 @@ const struct init_str init_str_tbl[] = {
     { &consts.str.evalc,       "eval:" },
     { &consts.str.exit,        "exit" },
     { &consts.str.exitc,       "exit:" },
-    { &consts.str._false,       "#false" },
+    { &consts.str._false,      "#false" },
     { &consts.str.filterc,     "filter:" },
     { &consts.str.flush,       "flush" },
     { &consts.str.foreachc,    "foreach:" },
     { &consts.str.gec,         "ge:" },
     { &consts.str.gtc,         "gt:" },
     { &consts.str.hash,        "hash" },
-    { &consts.str.ifc,         "if:" },
-    { &consts.str.ifc_elsec,   "if:else:" },
     { &consts.str.indexc,      "index:" },
     { &consts.str.instance_methods, "instance-methods" },
     { &consts.str.instance_variables, "instance-variables" },
@@ -5442,7 +5414,6 @@ const struct init_str init_str_tbl[] = {
     { &consts.str.pquote,      "pquote" },
     { &consts.str.print,       "print" },
     { &consts.str.printc,      "print:" },
-    { &consts.str.quote,       "quote" },
     { &consts.str.range,       "range" },
     { &consts.str.rangec,      "range:" },
     { &consts.str.rangec_stepc, "range:step:" },
@@ -5460,7 +5431,6 @@ const struct init_str init_str_tbl[] = {
     { &consts.str.tostring,    "tostring" },
     { &consts.str.tostringc,   "tostring:" },
     { &consts.str._true,       "#true" },
-    { &consts.str.whilec,      "while:" },
     { &consts.str.writec,      "write:" },
     { &consts.str.xorc,        "xor:" }
 #ifndef NDEBUG
@@ -5499,8 +5469,6 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.list, &consts.str.new,  cm_list_new },
   { &consts.cl.list, &consts.str.newc, cm_list_new },
 
-  { &consts.cl.method_call, &consts.str.newc, cm_method_call_new },
-
   { &consts.cl.array, &consts.str.newc, cm_array_new },
 
   { &consts.cl.dict, &consts.str.new, cm_dict_new },
@@ -5522,7 +5490,7 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.metaclass, &consts.str.parent,             cm_class_parent },
   { &consts.cl.metaclass, &consts.str.instance_variables, cm_class_inst_vars },
 
-  { &consts.cl.object, &consts.str.quote,       cm_object_quote },
+  { &consts.cl.object, &consts.str.aquote,      cm_object_quote },
   { &consts.cl.object, &consts.str.eval,        cm_object_eval },
   { &consts.cl.object, &consts.str.instance_of, cm_object_instof },
   { &consts.cl.object, &consts.str.equalsc,     cm_object_eq },
@@ -5531,7 +5499,9 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.object, &consts.str.printc,      cm_object_printc },
   { &consts.cl.object, &consts.str.atc,         cm_object_at },
   { &consts.cl.object, &consts.str.atc_putc,    cm_object_at_put },
-  { &consts.cl.object, &consts.str.whilec,      cm_object_while },
+  { &consts.cl.object, &consts.str.aifc,        cm_object_if },
+  { &consts.cl.object, &consts.str.aifc_elsec,  cm_object_if_else },
+  { &consts.cl.object, &consts.str.awhilec,     cm_object_while },
   { &consts.cl.object, &consts.str._break,      cm_object_break },
   { &consts.cl.object, &consts.str._continue,   cm_object_cont },
   { &consts.cl.object, &consts.str._return,     cm_object_return },
@@ -5544,8 +5514,6 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl.boolean, &consts.str.not,       cm_boolean_not },
   { &consts.cl.boolean, &consts.str.tostring,  cm_boolean_tostring },
   { &consts.cl.boolean, &consts.str.equalsc,   cm_boolean_equals },
-  { &consts.cl.boolean, &consts.str.ifc,       cm_boolean_if },
-  { &consts.cl.boolean, &consts.str.ifc_elsec, cm_boolean_if_else },
   { &consts.cl.boolean, &consts.str.assert,    cm_boolean_assert },
 
   { &consts.cl.integer, &consts.str.addc,         cm_integer_add },

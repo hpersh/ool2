@@ -119,15 +119,9 @@ qstr:
     --size;
   }
   
-  vm_push(1);
-  
-  m_cons(consts.str.quote, NIL);
-  vm_assign(1, R0);
   m_string_new(1, size, yytext + 1);
-  m_cons(R0, R1);
-  m_method_call_new(R0);
-  
-  vm_pop(1);
+  m_cons(R0, NIL);
+  m_method_call_new(consts.str.aquote, R0);
   
   vm_push(0);
   $$ = R0;
@@ -150,7 +144,7 @@ dsym:
   unsigned k, n;
   char     *p, *q;
   
-  vm_pushm(1, 2);
+  vm_push(1);
   
   for (k = 0, p = yytext;; p = q + 1, ++k) {
     q = index(p, '.');
@@ -163,14 +157,11 @@ dsym:
       continue;
     }
     
-    vm_assign(2, R0);
-    m_cons(consts.str.quote, NIL);
-    m_cons(R2, R0);
-    m_method_call_new(R0);
     m_cons(R0, NIL);
-    m_cons(consts.str.atc, R0);
+    m_method_call_new(consts.str.aquote, R0);
+    m_cons(R0, NIL);
     m_cons(R1, R0);
-    m_method_call_new(R0);
+    m_method_call_new(consts.str.atc, R0);
     vm_assign(1, R0);
     
     if (q == 0)  break;
@@ -178,7 +169,7 @@ dsym:
   
   vm_assign(0, R1);
   
-  vm_popm(1, 2);
+  vm_pop(1);
   
   vm_push(0);
   $$ = R0;
@@ -329,18 +320,11 @@ method_call:
 
   m_cons($4, NIL);
   vm_assign(1, R0);
-  m_string_new(1, 4, "put:");
-  m_cons(R0, R1);
-  vm_assign(1, R0);
-  m_cons(consts.str.quote, NIL);
-  m_cons($2, R0);
-  m_method_call_new(R0);
-  m_cons(R0, R1);
-  vm_assign(1, R0);
-  m_string_new(1, 4, "new:");
+  m_cons($2, NIL);
+  m_method_call_new(consts.str.aquote, R0);
   m_cons(R0, R1);
   m_cons(consts.str.environment, R0);
-  m_method_call_new(R0);
+  m_method_call_new(consts.str.newc_putc, R0);
 
   vm_pop(1);
     
@@ -353,18 +337,11 @@ method_call:
 
   m_cons($4, NIL);
   vm_assign(1, R0);
-  m_string_new(1, 4, "put:");
-  m_cons(R0, R1);
-  vm_assign(1, R0);
-  m_cons(consts.str.quote, NIL);
-  m_cons($2, R0);
-  m_method_call_new(R0);
-  m_cons(R0, R1);
-  vm_assign(1, R0);
-  m_string_new(1, 3, "at:");
+  m_cons($2, NIL);
+  m_method_call_new(consts.str.aquote, R0);
   m_cons(R0, R1);
   m_cons(consts.str.environment, R0);
-  m_method_call_new(R0);
+  m_method_call_new(consts.str.atc_putc, R0);
 
   vm_pop(1);
     
@@ -373,42 +350,64 @@ method_call:
 }
 	| TOK_LSQBR dsym TOK_EQUAL expr TOK_RSQBR
 {
-  vm_push(1);
-
-  m_cons($4, NIL);
-  vm_assign(1, R0);
-  m_string_new(1, 4, "put:");
-  m_cons(R0, R1);
-  _method_call_concat($2, R0);
-  vm_assign(0, $2);
-
-  vm_pop(1);
+  m_list_concat(&METHOD_CALL($2)->args, $4);
+  m_method_call_new(consts.str.atc_putc, METHOD_CALL($2)->args);
 
   vm_push(0);
   $$ = R0;
 }
         | TOK_LSQBR expr sym TOK_RSQBR
 {
-  m_cons($3, NIL);
-  m_cons($2, R0);
-  m_method_call_new(R0);
+  m_cons($2, NIL);
+  m_method_call_new($3, R0);
 
   vm_push(0);
   $$ = R0;
 }
         | TOK_LSQBR expr csym TOK_RSQBR
 {
-  m_cons($3, NIL);
-  m_cons($2, R0);
-  m_method_call_new(R0);
+  m_cons($2, NIL);
+  m_method_call_new($3, R0);
 
   vm_push(0);
   $$ = R0;
 }
         | TOK_LSQBR expr method_call_sel_and_args TOK_RSQBR
 {
+  obj_t    p, *q, r;
+  unsigned n, k;
+  char     *s;
+
   m_cons($2, $3);
-  m_method_call_new(R0);
+
+  vm_pushm(1, 2);
+  
+  vm_assign(1, R0);
+  vm_assign(2, NIL);
+  for (k = n = 0, q = &R2, p = R1; p; p = CDR(p), ++n) {
+    if (n & 1) {
+      k += string_len(CAR(p));
+      continue;
+    }
+
+    m_cons(CAR(p), NIL);
+    OBJ_ASSIGN(*q, R0);
+    q = &CDR(R0);
+  }
+
+  vm_inst_alloc(consts.cl.string);
+  inst_init(R0, k + 1);
+  for (k = n = 0, s = STRING(R0)->data, p = R1; p; p = CDR(p), ++n) {
+    if ((n & 1) == 0)  continue;
+
+    r = CAR(p);
+    strcpy(s, STRING(r)->data);
+    s += string_len(r);
+  }
+
+  m_method_call_new(R0, R2);
+
+  vm_popm(1, 2);
 
   vm_push(0);
   $$ = R0;
@@ -534,9 +533,8 @@ expr:
 }
         | TOK_QUOTE expr
 {
-  m_cons(consts.str.quote, NIL);
-  m_cons($2, R0);
-  m_method_call_new(R0);
+  m_cons($2, NIL);
+  m_method_call_new(consts.str.aquote, R0);
   
   vm_push(0);
   $$ = R0;
