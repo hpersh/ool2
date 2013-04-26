@@ -193,7 +193,7 @@ fatal(unsigned errcode)
 {
   HARD_ASSERT(errcode < ARRAY_SIZE(fatal_msgs));
 
-  fprintf(stderr, "*** FATAL ERROR: %s\n", fatal_msgs[errcode]);
+  fprintf(stderr, "\n*** FATAL ERROR: %s\n", fatal_msgs[errcode]);
 
   abort();
 }
@@ -874,7 +874,7 @@ frame_jmp(unsigned type, int frame_jmp_code)
 
 /***************************************************************************/
 
-void m_method_call(struct frame_method_call *mcfrp, obj_t sel, unsigned argc, obj_t args);
+void m_method_call(obj_t sel, unsigned argc, obj_t args);
 void m_method_call_1(obj_t sel, obj_t recvr);
 void m_method_call_2(obj_t sel, obj_t recvr, obj_t arg);
 void m_method_call_3(obj_t sel, obj_t recvr, obj_t arg1, obj_t arg2);
@@ -911,40 +911,46 @@ method_run(struct frame_method_call *mcfrp, obj_t cl, obj_t sel, obj_t func, uns
 }
 
 void
-m_method_call(struct frame_method_call *mcfrp, obj_t sel, unsigned argc, obj_t args)
+m_method_call(obj_t sel, unsigned argc, obj_t args)
 {
   obj_t recvr = CAR(args);
   obj_t cl, p;
 
   vm_push(0);
 
-  cl = inst_of(recvr);
-  if (cl == NIL || cl == consts.cl.metaclass) {
-    for (cl = recvr; cl; cl = CLASS(cl)->parent) {
-      if (p = dict_at(CLASS(cl)->cl_methods, sel)) {
+  FRAME_METHOD_CALL_BEGIN(sel, args) {
+    struct frame_method_call *mcfrp = (struct frame_method_call *) frp;
+
+    cl = inst_of(recvr);
+    if (cl == NIL || cl == consts.cl.metaclass) {
+      for (cl = recvr; cl; cl = CLASS(cl)->parent) {
+	if (p = dict_at(CLASS(cl)->cl_methods, sel)) {
+	  method_run(mcfrp, cl, sel, CDR(p), argc, args);
+	  goto done;
+	}
+      }
+    }
+    
+    for (cl = inst_of(recvr); cl; cl = CLASS(cl)->parent) {
+      if (p = dict_at(CLASS(cl)->inst_methods, sel)) {
 	method_run(mcfrp, cl, sel, CDR(p), argc, args);
 	goto done;
       }
     }
-  }
-
-  for (cl = inst_of(recvr); cl; cl = CLASS(cl)->parent) {
-    if (p = dict_at(CLASS(cl)->inst_methods, sel)) {
-      method_run(mcfrp, cl, sel, CDR(p), argc, args);
-      goto done;
+    
+    if (mcfrp) {
+      cl = inst_of(recvr);
+      if (!(cl == NIL || cl == consts.cl.metaclass)) {
+	mcfrp->cl = cl;
+      }
     }
-  }
+    
+    error(ERR_NO_METHOD);
 
-  if (mcfrp) {
-    cl = inst_of(recvr);
-    if (!(cl == NIL || cl == consts.cl.metaclass)) {
-      mcfrp->cl = cl;
-    }
-  }
-
-  error(ERR_NO_METHOD);
-
- done:
+  done:
+    ;
+  } FRAME_METHOD_CALL_END;
+  
   vm_drop();
 }
 
@@ -955,7 +961,7 @@ m_method_call_1(obj_t sel, obj_t recvr)
 
   m_cons(recvr, NIL);
 
-  m_method_call(0, sel, 1, R0);
+  m_method_call(sel, 1, R0);
 
   vm_drop();
 }
@@ -968,7 +974,7 @@ m_method_call_2(obj_t sel, obj_t recvr, obj_t arg)
   m_cons(arg, NIL);
   m_cons(recvr, R0);
 
-  m_method_call(0, sel, 2, R0);
+  m_method_call(sel, 2, R0);
 
   vm_drop();
 }
@@ -982,7 +988,7 @@ m_method_call_3(obj_t sel, obj_t recvr, obj_t arg1, obj_t arg2)
   m_cons(arg1, R0);
   m_cons(recvr, R0);
 
-  m_method_call(0, sel, 3, R0);
+  m_method_call(sel, 3, R0);
 
   vm_drop();
 }
@@ -2462,6 +2468,21 @@ cm_float_equals(unsigned argc, obj_t args)
 }
 
 void
+cm_float_ge(unsigned argc, obj_t args)
+{
+  obj_t recvr, arg;
+
+  if (argc != 2)                             error(ERR_NUM_ARGS);
+  recvr = CAR(args);
+  if (!is_kind_of(recvr, consts.cl._float))  error(ERR_INVALID_ARG, recvr);
+  arg = CAR(CDR(args));
+
+  m_boolean_new(inst_of(arg) == inst_of(recvr)
+		&& FLOAT(arg)->val <= FLOAT(recvr)->val
+		);
+}
+
+void
 cm_float_tostring(unsigned argc, obj_t args)
 {
   obj_t recvr;
@@ -3664,14 +3685,9 @@ cm_method_call_eval(unsigned argc, obj_t args)
     m_list_eval(METHOD_CALL(recvr)->args);
   }
 
-  FRAME_METHOD_CALL_BEGIN(METHOD_CALL(recvr)->sel, R0) {
-
-    m_method_call((struct frame_method_call *) frp,
-		  METHOD_CALL(recvr)->sel,
-		  METHOD_CALL(recvr)->argc,
-		  R0);
-
-  } FRAME_METHOD_CALL_END;
+  m_method_call(METHOD_CALL(recvr)->sel,
+		METHOD_CALL(recvr)->argc,
+		R0);
 }
 
 void
@@ -5041,6 +5057,7 @@ error(unsigned errcode, ...)
   fp   = _FILE(outf)->fp;
   va_start(ap, errcode);
 
+  fprintf(fp, "\n*** ERROR - ");
   switch (errcode) {
   case ERR_STACK_OVF:
     fprintf(fp, "Stack overflow\n");
@@ -5545,6 +5562,7 @@ const struct init_method init_cl_method_tbl[] = {
   { &consts.cl._float, &consts.str.minus,    cm_float_minus },
   { &consts.cl._float, &consts.str.hash,     cm_float_hash },
   { &consts.cl._float, &consts.str.equalsc,  cm_float_equals },
+  { &consts.cl._float, &consts.str.gec,      cm_float_ge },
   { &consts.cl._float, &consts.str.tostring, cm_float_tostring },
 
   { &consts.cl.string, &consts.str.hash,        cm_string_hash },
